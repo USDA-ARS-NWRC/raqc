@@ -3,20 +3,23 @@ import numpy as np
 import copy
 import math
 from sklearn.feature_extraction import image
+import sys, os
+from subprocess import run
 
 class MultiArrayOverlap(object):
-    def __init__(self, fp_d1, fp_d2, fp_out):
-        with rio.open(fp_d1) as src:
+    def __init__(self, file_path_dataset1, file_path_dataset2, file_out_root, file_name_modifier):
+        with rio.open(file_path_dataset1) as src:
             self.d1 = src
             self.meta1 = self.d1.profile
-            mat1 = self.d1.read()  #matrix
-            self.mat1 = mat1[0]
-        with rio.open(fp_d2) as src:
+        with rio.open(file_path_dataset2) as src:
             self.d2 = src
             self.meta2 = self.d2.profile
-            mat2 = self.d2.read()  #matrix
-            self.mat2 = mat2[0]
-        self.fp_out = fp_out
+        self.file_path_dataset1 = file_path_dataset1
+        self.file_path_dataset2 = file_path_dataset2
+        year1 = file_path_dataset1.split('/')[-1].split('_')[0]
+        year2 = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
+        self.file_path_out = '{0}{1}_to_{2}_{3}.tif'.format(file_out_root, year1, year2, file_name_modifier)
+        self.file_out_root = file_out_root
 
     def clip_extent_overlap(self):
         """
@@ -28,42 +31,58 @@ class MultiArrayOverlap(object):
         d1 = self.d1
         d2 = self.d2
         #grab basics
-        bounds = [d1.bounds.left, d1.bounds.bottom, d1.bounds.right, d1.bounds.top, \
-                d2.bounds.left, d2.bounds.bottom, d2.bounds.right, d2.bounds.top]
         rez = meta['transform'][0]  # spatial resolution
-        # minimum overlapping extent
-        left_max_bound = max(bounds[0], bounds[4])
-        bottom_max_bound = max(bounds[1], bounds[5])
-        right_min_bound =  min(bounds[2], bounds[6])
-        top_min_bound = min(bounds[3], bounds[7])
-        self.top_max_bound = top_min_bound
-        self.left_max_bound = left_max_bound
-        for d in range(2):  # datasets
-            # below loop makes list of line and sample georaphic coordinates (column and row)
-            for r in range(2):  #row or column (i.e. samples or lines)
-                num_lines_or_samps = math.ceil((bounds[3 + d * 4 - r] - bounds[1 + d * 4 - r])/rez)
-                coords = []
-                for c in range(0, num_lines_or_samps):
-                    coords.append(bounds[1 + d * 4 - r] + rez * c)
-                if r == 0:  # row and data 1
-                    del coords[0]
-                    coords.append(bounds[1 + d * 4 - r] + rez * (c + 1))
-                    row = coords.copy()
-                    num_samps = num_lines_or_samps
-                elif r == 1:  # col and data 1:
-                    col = coords.copy()
-            # get indices of minimum overlapping extent
-            ids = [None] * 4
-            ids[0:4] = [num_samps - row.index(top_min_bound) - 1, num_samps - row.index(bottom_max_bound + rez) -1, \
-                    col.index(left_max_bound), col.index(right_min_bound - rez)]
-            #subset both datasets --> mat_clip[num]
-            if d == 0:
-                mat = self.mat1
-                mat_clip1 = mat[ids[0]:ids[1], ids[2]:ids[3]]
-            elif d == 1:
-                mat = self.mat2
-                mat_clip2 = mat[ids[0]:ids[1], ids[2]:ids[3]]
-        # calculations on np arrays fail with np.nan values --> save one of each mat with np.nans and -9999
+        rez2 = self.meta2['transform'][0]
+        # check that resolutions are the same.  Note: if rez not a whole number, it will be rounded and rasters aligned
+        if round(rez) == round(rez2):
+            pass
+        else:
+            sys.exit("check that spatial resolution of your two files are the same")
+
+        # grab bounds of common/overlapping extent and prepare function call for gdal to clip to extent and align
+        left_max_bound = max(d1.bounds.left, d2.bounds.left)
+        bottom_max_bound = max(d1.bounds.bottom, d2.bounds.bottom)
+        right_min_bound =  min(d1.bounds.right, d2.bounds.right)
+        top_min_bound = min(d1.bounds.top, d2.bounds.top)
+        self.left_max_bound = left_max_bound - (left_max_bound % round(rez))
+        bottom_max_bound = bottom_max_bound + (round(rez) - bottom_max_bound % round(rez))
+        right_min_bound = right_min_bound - (right_min_bound % round(rez))
+        self.top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
+        file_name_dataset1_te = os.path.splitext(self.file_path_dataset1.split('/')[-1])[0] + 'common_extent.tif'
+        file_name_dataset1_te = self.file_out_root + file_name_dataset1_te
+        file_name_dataset2_te = os.path.splitext(self.file_path_dataset2.split('/')[-1])[0] + '_common_extent.tif'
+        file_name_dataset2_te = self.file_out_root + file_name_dataset2_te
+        # file_path_dataset2_te = os.path.splitext(self.file_path_dataset2)[0] + '_common_extent.tif'
+
+        # fun gdal command through subprocesses.run to clip and align to commom extent
+        print('This will overwrite the "_common_extent.tif" versions of both input files if they are already in exisitence (through this program)' +
+                ' Ensure that file paths "<file_path_dataset1>_common_extent.tif" and "<file_path_dataset2>_common_extent.tif" do not exist or continue to replace them' +
+                ' to proceed type "yes". to exit type "no"')
+        while True:
+            response = input()
+            if response.lower() == 'yes':
+                run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
+                                                                        self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
+                run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
+                                                                        self.file_path_dataset2, file_name_dataset2_te) + ' -overwrite'
+                run(run_arg1, shell = True)
+                run(run_arg2, shell = True)
+                break
+            elif response.lower() == 'no':
+                sys.exit("exiting program")
+                break
+            else:
+                print('please answer "yes" or "no"')
+
+        #open newly created common extent tifs for use in further analyses
+        with rio.open(file_name_dataset1_te) as src:
+            d1_te = src
+            mat_clip1 = d1_te.read()  #matrix
+            mat_clip1 = mat_clip1[0]
+        with rio.open(file_name_dataset2_te) as src:
+            d2_te = src
+            mat_clip2 = d2_te.read()  #matrix
+            mat_clip2 = mat_clip2[0]
         self.mat_clip1_nans, self.mat_clip2_nans = mat_clip1.copy(), mat_clip2.copy()
         mat_clip1, mat_clip2 = mat_clip1.copy(), mat_clip2.copy()
         mat_clip1[np.isnan(mat_clip1)] = -9999
@@ -159,7 +178,7 @@ class MultiArrayOverlap(object):
         self.lb = round(np.nanpercentile(temp[temp < 0], 50), 3)
         self.ub = round(np.nanpercentile(temp[temp > 0], 50), 3)
 
-    def save_tiff(self, name, fname, *argv):
+    def save_tiff(self, fname):
         """
         saves matix to geotiff using RasterIO basically. Specify one or more matrices in list of strings
         with attribute names, or leave argv blank to get mat_diff_norm_nans along with all outlier types
@@ -170,40 +189,36 @@ class MultiArrayOverlap(object):
             argv:  list of strings of attribute names if don't want default
 
         """
+        flag_names = self.flag_names.copy()
+        flag_names.append('mat_diff_norm_nans')  # 1)Change here and @2 if desire to save single band
+        dims = getattr(self, flag_names[0]).shape
+        count = len(flag_names)
+            # name = ['flag_loss_block', 'flag_gain_block', 'flag_hist', 'mat_diff_norm_nans']
 
-        fn_out = self.fp_out + fname + '.tif'
-        if len(argv) > 0:  # if a specific band is specified
-            name = argv[0]
-            dims = getattr(self, name).shape
-            count = 1
-        else:
-            name = ['flag_loss_block', 'flag_gain_block', 'flag_hist', 'mat_diff_norm_nans']
-            dims = getattr(self, name[0]).shape
-            count = len(name)
 
         meta_new = copy.deepcopy(self.meta1)
         aff = copy.deepcopy(self.d1.transform)
-        new_aff = rio.Affine(aff.a, aff.b, self.left_max_bound, aff.d, aff.e, self.top_max_bound)
+        new_aff = rio.Affine(aff.a, aff.b, self.left_max_bound, aff.d, aff.e, self.top_min_bound)
         meta_new.update({
             'height':dims[0],
             'width': dims[1],
             'transform': new_aff,
             'count': count})
 
-        if count == 1:
-            with rio.open(fn_out, 'w', **meta_new) as dst:
-                mat_temp = getattr(self,name)
+        if count == 1:  # 2) this if count==1 block unused currently.  can allow single band image saving if desired
+            with rio.open(self.file_path_out, 'w', **meta_new) as dst:
+                mat_temp = getattr(self,flag_names[0])
                 try:
                     dst.write(mat_temp,1)# print(mask.shape)
                 except ValueError:
                     dst.write(mat_temp.astype('float32'),1)
         if count > 1:
-            with rio.open(fn_out, 'w', **meta_new) as dst:
-                for id, band in enumerate(name, start = 1):
+            with rio.open(self.file_path_out, 'w', **meta_new) as dst:
+                for id, band in enumerate(flag_names, start = 1):
                     try:
-                        dst.write_band(id, getattr(self, name[id - 1]))# print(mask.shape)
+                        dst.write_band(id, getattr(self, flag_names[id - 1]))# print(mask.shape)
                     except ValueError:
-                        mat_temp = getattr(self, name[id - 1])
+                        mat_temp = getattr(self, flag_names[id - 1])
                         dst.write_band(id, mat_temp.astype('float32'))
 
     def make_diff_mat(self):
@@ -290,6 +305,7 @@ class PatternFilters():
                 **pct_temp**: Proportion of cells/pixels with values > 0 present in each
                 moving window centered at target pixel. Array size same as input array accessed by name
         """
+        print('in mov wind 2')
         if isinstance(name, str):
             mat = getattr(self, name)
         else:
@@ -304,13 +320,12 @@ class PatternFilters():
         return(pct_temp)
 
 class Flags(MultiArrayOverlap, PatternFilters):
-    def init(self, fp_d1, fp_d2, fp_out):
-        MultiArrayOverlap.init(self, fp_d1, fp_d2, fp_out)
+    def init(self, file_path_dataset1, file_path_dataset2, file_out_root):
+        MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2, file_out_root)
 
     def hist2d_with_bins_mapped(self, name, nbins):
         """
         basically creates all components necessary to create historgram using np.histogram2d, and saves map locations
-        in x and y list at each histogram space cell.  These are unpacked in hist_to_map_space() method later.  Useful
         when locations from matrix contributing to pertinent bins on histogram are needed.
 
         Args:
@@ -405,14 +420,16 @@ class Flags(MultiArrayOverlap, PatternFilters):
         Args:
             names:      list of strings.  names of flags saved as boolean matrice attributes
         """
+        flag_names = []
         for i in range(len(names)):
-            flag = 'flag_' + names[i]
-            flagged = getattr(self, flag)
+            flag_names.append('flag_' + names[i])
+            flagged = getattr(self, flag_names[i])
             if i == 0:
                 flag_combined = flagged
             else:
                 flag_combined = flag_combined | flagged
         self.flag_combined = flag_combined
+        self.flag_names = flag_names  #just accumulates all names into a list
 
 
     def __repr__(self):

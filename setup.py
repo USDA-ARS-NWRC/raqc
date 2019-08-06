@@ -34,16 +34,18 @@ setup(
     description="visual and graphical diagnostic of repeat 3D array collections - i.e. satellite imagery - for quick mapping of potentially erroneous data",
     entry_points={
         'console_scripts': [
-            'raqc=raqc.cli:main',
-        ],
+            'raqc=raqc.cli:main'
+        ]
     },
     install_requires=requirements,
     license="GNU General Public License v3",
     long_description=readme + '\n\n' + history,
     include_package_data=True,
+    package_data={'raqc':['CoreConfig.ini']},
     keywords='raqc',
     name='raqc',
-    packages=find_packages(include=['raqc']),
+#    packages=find_packages(include=['raqc']),
+    packages=['raqc'],
     setup_requires=setup_requirements,
     test_suite='tests',
     tests_require=test_requirements,
