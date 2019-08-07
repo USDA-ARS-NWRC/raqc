@@ -1,5 +1,5 @@
-import rasterio as rio
 import numpy as np
+import rasterio as rio
 import copy
 import math
 from sklearn.feature_extraction import image
@@ -28,6 +28,7 @@ class MultiArrayOverlap(object):
         with nans (mat_clip1, mat_clip2 and mat_clip_nans of each).
         """
         meta = self.meta1  #metadata
+        print(meta)
         d1 = self.d1
         d2 = self.d2
         #grab basics
@@ -44,45 +45,51 @@ class MultiArrayOverlap(object):
         bottom_max_bound = max(d1.bounds.bottom, d2.bounds.bottom)
         right_min_bound =  min(d1.bounds.right, d2.bounds.right)
         top_min_bound = min(d1.bounds.top, d2.bounds.top)
-        self.left_max_bound = left_max_bound - (left_max_bound % round(rez))
+        left_max_bound = left_max_bound - (left_max_bound % round(rez))
         bottom_max_bound = bottom_max_bound + (round(rez) - bottom_max_bound % round(rez))
         right_min_bound = right_min_bound - (right_min_bound % round(rez))
-        self.top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
-        file_name_dataset1_te = os.path.splitext(self.file_path_dataset1.split('/')[-1])[0] + 'common_extent.tif'
+        top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
+        file_name_dataset1_te = os.path.splitext(self.file_path_dataset1.split('/')[-1])[0] + '_common_extent.tif'
         file_name_dataset1_te = self.file_out_root + file_name_dataset1_te
         file_name_dataset2_te = os.path.splitext(self.file_path_dataset2.split('/')[-1])[0] + '_common_extent.tif'
         file_name_dataset2_te = self.file_out_root + file_name_dataset2_te
-        # file_path_dataset2_te = os.path.splitext(self.file_path_dataset2)[0] + '_common_extent.tif'
-
-        # fun gdal command through subprocesses.run to clip and align to commom extent
-        print('This will overwrite the "_common_extent.tif" versions of both input files if they are already in exisitence (through this program)' +
-                ' Ensure that file paths "<file_path_dataset1>_common_extent.tif" and "<file_path_dataset2>_common_extent.tif" do not exist or continue to replace them' +
-                ' to proceed type "yes". to exit type "no"')
-        while True:
-            response = input()
-            if response.lower() == 'yes':
-                run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
-                                                                        self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
-                run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
-                                                                        self.file_path_dataset2, file_name_dataset2_te) + ' -overwrite'
-                run(run_arg1, shell = True)
-                run(run_arg2, shell = True)
-                break
-            elif response.lower() == 'no':
-                sys.exit("exiting program")
-                break
-            else:
-                print('please answer "yes" or "no"')
+        print(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound)
+        #Check if file already exists
+        if not (os.path.exists(file_name_dataset1_te)) & (os.path.exists(file_name_dataset2_te)):
+            # fun gdal command through subprocesses.run to clip and align to commom extent
+            print('This will overwrite the "_common_extent.tif" versions of both input files if they are already in exisitence (through this program)' +
+                    ' Ensure that file paths "<file_path_dataset1>_common_extent.tif" and "<file_path_dataset2>_common_extent.tif" do not exist or continue to replace them' +
+                    ' to proceed type "yes". to exit type "no"')
+            while True:
+                response = input()
+                if response.lower() == 'yes':
+                    run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
+                                                                            self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
+                    run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
+                                                                            self.file_path_dataset2, file_name_dataset2_te) + ' -overwrite'
+                    run(run_arg1, shell = True)
+                    run(run_arg2, shell = True)
+                    break
+                elif response.lower() == 'no':
+                    sys.exit("exiting program")
+                    break
+                else:
+                    print('please answer "yes" or "no"')
+        else:
+            pass
 
         #open newly created common extent tifs for use in further analyses
+        print('file name: ', file_name_dataset1_te)
         with rio.open(file_name_dataset1_te) as src:
             d1_te = src
+            self.meta = d1_te.profile  # just need one meta data file because it's the same for both
             mat_clip1 = d1_te.read()  #matrix
             mat_clip1 = mat_clip1[0]
         with rio.open(file_name_dataset2_te) as src:
             d2_te = src
             mat_clip2 = d2_te.read()  #matrix
             mat_clip2 = mat_clip2[0]
+        print(self.meta)
         self.mat_clip1_nans, self.mat_clip2_nans = mat_clip1.copy(), mat_clip2.copy()
         mat_clip1, mat_clip2 = mat_clip1.copy(), mat_clip2.copy()
         mat_clip1[np.isnan(mat_clip1)] = -9999
@@ -191,36 +198,20 @@ class MultiArrayOverlap(object):
         """
         flag_names = self.flag_names.copy()
         flag_names.append('mat_diff_norm_nans')  # 1)Change here and @2 if desire to save single band
-        dims = getattr(self, flag_names[0]).shape
-        count = len(flag_names)
-            # name = ['flag_loss_block', 'flag_gain_block', 'flag_hist', 'mat_diff_norm_nans']
+        self.meta.update({
+            'count': len(flag_names)})
 
-
-        meta_new = copy.deepcopy(self.meta1)
-        aff = copy.deepcopy(self.d1.transform)
-        new_aff = rio.Affine(aff.a, aff.b, self.left_max_bound, aff.d, aff.e, self.top_min_bound)
-        meta_new.update({
-            'height':dims[0],
-            'width': dims[1],
-            'transform': new_aff,
-            'count': count})
-
-        if count == 1:  # 2) this if count==1 block unused currently.  can allow single band image saving if desired
-            with rio.open(self.file_path_out, 'w', **meta_new) as dst:
-                mat_temp = getattr(self,flag_names[0])
+        print(flag_names)
+        print('type ', type(flag_names))
+        print(len(flag_names))
+        with rio.open(self.file_path_out, 'w', **self.meta) as dst:
+            for id, band in enumerate(flag_names, start = 1):
                 try:
-                    dst.write(mat_temp,1)# print(mask.shape)
+                    dst.write_band(id, getattr(self, flag_names[id - 1]))# print(mask.shape)
                 except ValueError:
-                    dst.write(mat_temp.astype('float32'),1)
-        if count > 1:
-            with rio.open(self.file_path_out, 'w', **meta_new) as dst:
-                for id, band in enumerate(flag_names, start = 1):
-                    try:
-                        dst.write_band(id, getattr(self, flag_names[id - 1]))# print(mask.shape)
-                    except ValueError:
-                        mat_temp = getattr(self, flag_names[id - 1])
-                        dst.write_band(id, mat_temp.astype('float32'))
-
+                    mat_temp = getattr(self, flag_names[id - 1])
+                    dst.write_band(id, mat_temp.astype('float32'))
+                    
     def make_diff_mat(self):
         """
         Saves as attribute a normalized difference matrix of the two input tiffs
@@ -305,7 +296,7 @@ class PatternFilters():
                 **pct_temp**: Proportion of cells/pixels with values > 0 present in each
                 moving window centered at target pixel. Array size same as input array accessed by name
         """
-        print('in mov wind 2')
+
         if isinstance(name, str):
             mat = getattr(self, name)
         else:

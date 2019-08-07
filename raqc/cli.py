@@ -57,7 +57,7 @@ def main():
             break
 
     raqc_obj.combine_flags(flags)  # makes a combined flags map (which is not output), but also collects list of flag names for later
-    file_out = cfg['files']['file_name_out']
+    file_out = cfg['files']['file_path_out']
     raqc_obj.save_tiff(file_out)
 
 if __name__=='__main__':
