@@ -25,7 +25,7 @@ def main():
 
     # this initiates raqc object with file paths
     raqc_obj = multi_array.Flags(cfg['files']['file_path_in_date1'], cfg['files']['file_path_in_date2'],
-                                        cfg['files']['file_path_out'], cfg['files']['file_name_modifier'])
+                cfg['files']['file_path_topo'], cfg['files']['file_path_out'], cfg['files']['file_name_modifier'])
 
     raqc_obj.clip_extent_overlap()
     raqc_obj.make_diff_mat()
@@ -55,7 +55,7 @@ def main():
             block_window_threshold = cfg['block_behavior']['neighbor_threshold']
             raqc_obj.flag_blocks(block_window_size, block_window_threshold)
             break
-
+    raqc_obj.hypsometry()
     raqc_obj.combine_flags(flags)  # makes a combined flags map (which is not output), but also collects list of flag names for later
     file_out = cfg['files']['file_path_out']
     raqc_obj.save_tiff(file_out)
