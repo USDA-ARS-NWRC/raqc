@@ -97,7 +97,8 @@ class MultiArrayOverlap(object):
                         run_arg3 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format(self.file_path_topo, file_base_topo_te + '_dem.tif')
                         run(run_arg3, shell=True)
                     else:
-                        run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}'.format(round(rez), self.file_path_topo, file_base_topo_te + '_dem.tif'
+                        run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}'.format(round(rez), self.file_path_topo, file_base_topo_te + '_dem.tif')
+                        run(run_arg3, shell=True)
 
                     run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
                                                                             file_base_topo_te + '_dem.tif', file_base_topo_te + '_dem_common_extent.tif -overwrite')
