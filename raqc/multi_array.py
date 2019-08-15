@@ -49,10 +49,18 @@ class MultiArrayOverlap(object):
         rez3 = x[1] - x[0]
 
         # check that resolutions are the same.  Note: if rez not a whole number, it will be rounded and rasters aligned
-        if (round(rez) == round(rez2)) & (round(rez) == round(rez3)):  # janky way to check that all three rez are the same
+        if round(rez) == round(rez2):  # janky way to check that all three rez are the same
             pass
         else:
-            sys.exit("check that spatial resolution of your two files are the same")
+            sys.exit("check that spatial resolution of your two repeat array files are the same \
+                        must fix and try again")
+        if round(rez) == round(rez3):
+            topo_rez_same = True
+        else:
+            print('the resolution of your topo.nc file differs from repeat arrays.  It will be resized to \
+            fit the repeat arrays')
+            topo_rez_same = False
+
 
         # grab bounds of common/overlapping extent and prepare function call for gdal to clip to extent and align
         left_max_bound = max(d1.bounds.left, d2.bounds.left, topo_extents[0])
@@ -85,8 +93,12 @@ class MultiArrayOverlap(object):
                                                                             self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
                     run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
                                                                             self.file_path_dataset2, file_name_dataset2_te) + ' -overwrite'
-                    run_arg3 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format(self.file_path_topo, file_base_topo_te + '_dem.tif')
-                    run(run_arg3, shell=True)
+                    if topo_rez_same:
+                        run_arg3 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format(self.file_path_topo, file_base_topo_te + '_dem.tif')
+                        run(run_arg3, shell=True)
+                    else:
+                        run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}'.format(round(rez), self.file_path_topo, file_base_topo_te + '_dem.tif'
+
                     run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
                                                                             file_base_topo_te + '_dem.tif', file_base_topo_te + '_dem_common_extent.tif -overwrite')
 
