@@ -21,6 +21,9 @@ class MultiArrayOverlap(object):
         self.file_path_dataset2 = file_path_dataset2
         year1 = file_path_dataset1.split('/')[-1].split('_')[0]
         year2 = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
+        if file_out_root[-1] != '/':  #ensure user added forward slash
+            print('here')
+            file_out_root = file_out_root + '/'
         self.file_path_out = '{0}{1}_to_{2}_{3}.tif'.format(file_out_root, year1, year2, file_name_modifier)
         # topo = h5py.File(file_path_topo, 'r')
         # self.dem = topo['dem']
@@ -58,7 +61,7 @@ class MultiArrayOverlap(object):
             topo_rez_same = True
         else:
             print('the resolution of your topo.nc file differs from repeat arrays.  It will be resized to \
-            fit the repeat arrays')
+            fit the resolution repeat arrays.  your input file will NOT be changed')
             topo_rez_same = False
 
 
@@ -73,12 +76,16 @@ class MultiArrayOverlap(object):
         right_min_bound = right_min_bound - (right_min_bound % round(rez))
         top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
 
-        file_name_dataset1_te = os.path.splitext(self.file_path_dataset1.split('/')[-1])[0] + '_common_extent.tif'
-        file_name_dataset1_te = self.file_out_root + file_name_dataset1_te
-        file_name_dataset2_te = os.path.splitext(self.file_path_dataset2.split('/')[-1])[0] + '_common_extent.tif'
-        file_name_dataset2_te = self.file_out_root + file_name_dataset2_te
-        file_base_topo_te = self.file_path_dataset1.split('/')[-3] + '_' + self.file_path_dataset1.split('/')[-2]
+        file_name_dataset1_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset1).split('/')[-1])[0] + '_common_extent.tif'
+        file_name_dataset1_te = self.file_out_root + file_name_dataset1_te_temp
+        file_name_dataset2_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset2).split('/')[-1])[0] + '_common_extent.tif'
+        file_name_dataset2_te = self.file_out_root + file_name_dataset2_te_temp
+        id_date_start = file_name_dataset1_te_temp.index('2')  #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
+        file_base_topo_te = os.path.splitext(file_name_dataset1_te_temp)[0][:id_date_start + 8] + '_to_' +  \
+                            os.path.splitext(file_name_dataset2_te_temp)[0][id_date_start: id_date_start + 8]
+        # file_base_topo_te = self.file_path_dataset1.split('/')[-3] + '_' + self.file_path_dataset1.split('/')[-2]
         file_base_topo_te = self.file_out_root + file_base_topo_te
+        print(file_name_dataset1_te)
         print(file_base_topo_te)
         #Check if file already exists
         if not (os.path.exists(file_name_dataset1_te)) & (os.path.exists(file_name_dataset2_te) & (os.path.exists(file_base_topo_te + '_dem_common_extent.tif'))):
@@ -106,6 +113,8 @@ class MultiArrayOverlap(object):
                     run(run_arg1, shell = True)
                     run(run_arg2, shell = True)
                     run(run_arg4, shell = True)
+                    run_arg5 = 'rm ' + file_base_topo_te + '_dem.tif'
+                    run(run_arg5, shell = True)
                     print(run_arg4)
                     break
                 elif response.lower() == 'no':
@@ -377,6 +386,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.mat_shape = m1.shape
         m1_nan, m2_nan = m1[self.overlap_conditional], m2[self.overlap_conditional]
         bins, xedges, yedges = np.histogram2d(np.ravel(m1_nan), np.ravel(m2_nan), nbins)
+        # except TypeError: unorderable types:
+
         # Now find bin edges of overlapping snow depth locations from both dates, and save to self.bin_loc as array of tuples
         xedges = np.delete(xedges, -1)   # remove the last edge
         yedges = np.delete(yedges, -1)
@@ -509,14 +520,16 @@ class Flags(MultiArrayOverlap, PatternFilters):
         map_id_dem = np.full(self.overlap_conditional.shape, id_dem_unique[-1] + 1, dtype=int)  # makes nans max(id_dem) + 1
         map_id_dem[self.overlap_conditional] = id_dem
         snowline_mean = np.full(id_dem_unique.shape, -9999, dtype = 'float')
-        mat_clip2_masked = self.mat_clip2[self.overlap_conditional]
+        # use the matrix with the deepest mean basin snow depth to base snowline thresh off of.  Assuming deeper avg basin snow = lower snowline
+        if np.random.rand(self.mat_clip1[self.overlap_conditional]) > np.random.rand(self.mat_clip1[self.overlap_conditional]):
+            mat = self.mat_clip1[self.overlap_conditional]
+        else:
+            mat = self.mat_clip2[self.overlap_conditional]
         map_id_dem2_masked = map_id_dem[self.overlap_conditional]
         for id, id_dem_unique2 in enumerate(id_dem_unique):
-            snowline_mean[id] = getattr(mat_clip2_masked[map_id_dem2_masked == id_dem_unique2], 'mean')()
+            snowline_mean[id] = getattr(mat[map_id_dem2_masked == id_dem_unique2], 'mean')()
         id_min = np.min(np.where(snowline_mean > 0.40))
-        print(snowline_mean)
-        print(self.elevation_edges)
-        print(self.elevation_edges[id_min])
+        print('snowline elevation is: ', self.elevation_edges[id_min])
         self.snowline_elev = self.elevation_edges[id_min]  #elevation of estimated snowline
 
     def combine_flags(self, names):
@@ -542,3 +555,114 @@ class Flags(MultiArrayOverlap, PatternFilters):
     def __repr__(self):
             return ("Main items of use are matrices clipped to each other's extent and maps of outlier flags \
                     Also capable of saving geotiffs and figures")
+
+    # def clip_extent_overlap(self):
+    #     """
+    #     finds overlapping extent of two geotiffs. Saves as attributes clipped versions
+    #     of both matrices extracted from geotiffs, and clipped matrices with -9999 replaced
+    #     with nans (mat_clip1, mat_clip2 and mat_clip_nans of each).
+    #     """
+    #     meta = self.meta1  #metadata
+    #     d1 = self.d1
+    #     d2 = self.d2
+    #     #grab basics
+    #     rez = meta['transform'][0]  # spatial resolution
+    #     rez2 = self.meta2['transform'][0]
+    #
+    #     #find topo file info
+    #     topo = Dataset(self.file_path_topo)
+    #     x = topo.variables['x'][:]
+    #     y = topo.variables['y'][:]
+    #     topo_extents = [None] * 4
+    #     topo_extents[0], topo_extents[1], topo_extents[2], topo_extents[3], = x.min(), y.min(), x.max(), y.max()
+    #     rez3 = x[1] - x[0]
+    #
+    #     # check that resolutions are the same.  Note: if rez not a whole number, it will be rounded and rasters aligned
+    #     if round(rez) == round(rez2):  # janky way to check that all three rez are the same
+    #         pass
+    #     else:
+    #         sys.exit("check that spatial resolution of your two repeat array files are the same \
+    #                     must fix and try again")
+    #     if round(rez) == round(rez3):
+    #         topo_rez_same = True
+    #     else:
+    #         print('the resolution of your topo.nc file differs from repeat arrays.  It will be resized to \
+    #         fit the repeat arrays')
+    #         topo_rez_same = False
+    #
+    #
+    #     # grab bounds of common/overlapping extent and prepare function call for gdal to clip to extent and align
+    #     left_max_bound = max(d1.bounds.left, d2.bounds.left, topo_extents[0])
+    #     bottom_max_bound = max(d1.bounds.bottom, d2.bounds.bottom, topo_extents[1])
+    #     right_min_bound =  min(d1.bounds.right, d2.bounds.right, topo_extents[2])
+    #     top_min_bound = min(d1.bounds.top, d2.bounds.top, topo_extents[3])
+    #     # ensure nothing after decimal - nice whole number, admittedly a float
+    #     left_max_bound = left_max_bound - (left_max_bound % round(rez))
+    #     bottom_max_bound = bottom_max_bound + (round(rez) - bottom_max_bound % round(rez))
+    #     right_min_bound = right_min_bound - (right_min_bound % round(rez))
+    #     top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
+    #
+    #     file_name_dataset1_te = os.path.splitext(self.file_path_dataset1.split('/')[-1])[0] + '_common_extent.tif'
+    #     file_name_dataset1_te = self.file_out_root + file_name_dataset1_te
+    #     file_name_dataset2_te = os.path.splitext(self.file_path_dataset2.split('/')[-1])[0] + '_common_extent.tif'
+    #     file_name_dataset2_te = self.file_out_root + file_name_dataset2_te
+    #     file_base_topo_te = self.file_path_dataset1.split('/')[-3] + '_' + self.file_path_dataset1.split('/')[-2]
+    #     file_base_topo_te = self.file_out_root + file_base_topo_te
+    #     print(file_base_topo_te)
+    #     #Check if file already exists
+    #     if not (os.path.exists(file_name_dataset1_te)) & (os.path.exists(file_name_dataset2_te) & (os.path.exists(file_base_topo_te + '_dem_common_extent.tif'))):
+    #         # fun gdal command through subprocesses.run to clip and align to commom extent
+    #         print('This will overwrite the "_common_extent.tif" versions of both input files if they are already in exisitence (through this program)' +
+    #                 ' Ensure that file paths "<file_path_dataset1>_common_extent.tif" and "<file_path_dataset2>_common_extent.tif" do not exist or continue to replace them' +
+    #                 ' to proceed type "yes". to exit type "no"')
+    #         while True:
+    #             response = input()
+    #             if response.lower() == 'yes':
+    #                 run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
+    #                                                                         self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
+    #                 run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
+    #                                                                         self.file_path_dataset2, file_name_dataset2_te) + ' -overwrite'
+    #                 if topo_rez_same:
+    #                     run_arg3 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format(self.file_path_topo, file_base_topo_te + '_dem.tif')
+    #                     run(run_arg3, shell=True)
+    #                 else:
+    #                     run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}'.format(round(rez), self.file_path_topo, file_base_topo_te + '_dem.tif')
+    #                     run(run_arg3, shell=True)
+    #
+    #                 run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
+    #                                                                         file_base_topo_te + '_dem.tif', file_base_topo_te + '_dem_common_extent.tif -overwrite')
+    #
+    #                 run(run_arg1, shell = True)
+    #                 run(run_arg2, shell = True)
+    #                 run(run_arg4, shell = True)
+    #                 run('rm ' + file_base_topo_te + '_dem.tif')
+    #                 print(run_arg4)
+    #                 break
+    #             elif response.lower() == 'no':
+    #                 sys.exit("exiting program")
+    #                 break
+    #             else:
+    #                 print('please answer "yes" or "no"')
+    #     else:
+    #         pass
+    #
+    #     #open newly created common extent tifs for use in further analyses
+    #
+    #     with rio.open(file_name_dataset1_te) as src:
+    #         d1_te = src
+    #         self.meta = d1_te.profile  # just need one meta data file because it's the same for both
+    #         mat_clip1 = d1_te.read()  #matrix
+    #         mat_clip1 = mat_clip1[0]
+    #     with rio.open(file_name_dataset2_te) as src:
+    #         d2_te = src
+    #         mat_clip2 = d2_te.read()  #matrix
+    #         mat_clip2 = mat_clip2[0]
+    #     with rio.open(file_base_topo_te + '_dem_common_extent.tif') as src:
+    #         topo_te = src
+    #         topo_clip = topo_te.read()
+    #         topo_clip = topo_clip[0]
+    #     # change nans (if present) to -9999
+    #     mat_clip1[np.isnan(mat_clip1)] = -9999
+    #     mat_clip2[np.isnan(mat_clip2)] = -9999
+    #     topo_clip[np.isnan(topo_clip)] = -9999
+    #     self.mat_clip1, self.mat_clip2, self.topo_clip = mat_clip1, mat_clip2, topo_clip
