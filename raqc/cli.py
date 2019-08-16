@@ -27,7 +27,10 @@ def main():
     raqc_obj = multi_array.Flags(cfg['files']['file_path_in_date1'], cfg['files']['file_path_in_date2'],
                 cfg['files']['file_path_topo'], cfg['files']['file_path_out'], cfg['files']['file_name_modifier'])
 
-    raqc_obj.clip_extent_overlap()
+    if not raqc_obj.already_clipped:
+        print('why are we clipping?')
+        raqc_obj.clip_extent_overlap()
+
     raqc_obj.make_diff_mat()
 
     name = cfg['difference_arrays']['name']
