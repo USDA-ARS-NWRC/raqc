@@ -12,10 +12,9 @@ import numpy_groupies as npg
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, file_name_modifier):
         # First check if user passed already clipped repeat array file paths
-        already_clipped1 = 'common_extent.tif' == file_path_dataset1[file_path_dataset1.index('common'):]
-        already_clipped2 = 'common_extent.tif' == file_path_dataset2[file_path_dataset2.index('common'):]
-        self.already_clipped = already_clipped1 & already_clipped2
-
+        string_match = 'common_extent'
+        self.already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2):
+        # already_clipped2 = 'common_extent.tif' == file_path_dataset2[file_path_dataset2.index('common'):]
         # save file paths needed for clipping
         if not self.already_clipped:
             self.file_path_dataset1 = file_path_dataset1
