@@ -13,7 +13,7 @@ class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, file_name_modifier):
         # First check if user passed already clipped repeat array file paths
         string_match = 'common_extent'
-        self.already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2):
+        self.already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2)
         # already_clipped2 = 'common_extent.tif' == file_path_dataset2[file_path_dataset2.index('common'):]
         # save file paths needed for clipping
         if not self.already_clipped:
@@ -148,16 +148,16 @@ class MultiArrayOverlap(object):
             pass
 
         #open newly created common extent tifs for use in further analyses
-        with rio.open(file_name_dataset1) as src:
+        with rio.open(file_name_dataset1_te) as src:
             d1_te = src
             self.meta = d1_te.profile  # just need one meta data file because it's the same for both
             mat_clip1 = d1_te.read()  #matrix
             mat_clip1 = mat_clip1[0]
-        with rio.open(file_name_dataset2) as src:
+        with rio.open(file_name_dataset2_te) as src:
             d2_te = src
             mat_clip2 = d2_te.read()  #matrix
             mat_clip2 = mat_clip2[0]
-        with rio.open(file_name_topo) as src:
+        with rio.open(file_base_topo_te + '_dem_common_extent.tif') as src:
             topo_te = src
             topo_clip = topo_te.read()
             topo_clip = topo_clip[0]
@@ -183,7 +183,8 @@ class MultiArrayOverlap(object):
         keys = {'lt':'<', 'gt':'>'}
         shp = getattr(self, name[0]).shape
         overlap_nan = np.ones(shp, dtype = bool)
-        overlap_conditional = np.ones(shp, dtype = bool)
+        overlap_conditional = np.zeros(shp, dtype = bool)
+        extreme_outliers = np.zeros(shp, dtype = bool)
         mat_ct = 0  # initialize count of mats for conditional masking
         for i in range(len(name)):
             mat = getattr(self, name[i])
@@ -193,13 +194,16 @@ class MultiArrayOverlap(object):
             else:
                 action_temp = True
             if np.isnan(mat).any():  # if nans are present and represented by np.nan.
+                print(i, 'if here')
                 mat_mask = mat.copy()
                 temp_nan = ~np.isnan(mat_mask)
                 mat_mask[np.isnan[mat_mask]] = -9999  # set nans to -9999
             elif (mat == -9999).any():  # if nans are present and represented by -9999
+                print(i, 'elif here')
                 mat_mask = mat.copy()
                 temp_nan = mat_mask != -9999  # set nans to -9999
             else:   # no nans present
+                print(i, 'else here')
                 mat_mask = mat.copy()
                 temp_nan = np.ones(shp, dtype = bool)
             if action_temp == True:
@@ -208,11 +212,13 @@ class MultiArrayOverlap(object):
                     op_str = keys[operation[id]]
                     cmd = 'mat_mask' + op_str + str(val[id])
                     temp = eval(cmd)
-                    overlap_conditional = overlap_conditional & temp
+                    overlap_conditional = overlap_conditional | temp
+                    extreme_outliers = extreme_outliers | (~temp)
                 mat_ct += 1
-                overlap_nan = overlap_nan & temp_nan  # where conditions of comparison are met and no nans present
-        self.overlap_nan = overlap_nan.copy()  # where overlap and no nans
+            overlap_nan = overlap_nan & temp_nan  # where conditions of comparison are met and no nans present
+        self.overlap_nan = overlap_nan  # where overlap and no nans
         self.overlap_conditional = overlap_conditional & overlap_nan
+        self.flag_extreme_outliers = extreme_outliers & overlap_nan
         # find upper bounds and lower bounds of normalized snow depth change for entire basin.  Note: Hard-coded to 50th percentile by trial and error
         temp = self.mat_diff_norm[self.overlap_nan]
         self.lower_bound = round(np.nanpercentile(temp[temp < 0], 50), 3)
@@ -430,6 +436,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 tuple_array[idyb[i], idxb[i]].append([idmr[i], idmc[i]])  #appends map space indices into bin space
         self.bin_loc = tuple_array  #array of tuples containing 0 to N x,y coordinates of overlapping snow map
                                     #locations contributing to 2d histogram bins
+        self.xedges, self.yedges, self.bins = xedges, yedges, bins
     def outliers_hist(self, thresh, moving_window_name, moving_window_size):
         """
         Finds spatial outliers in histogram and bins below a threshold bin count.
@@ -477,16 +484,16 @@ class Flags(MultiArrayOverlap, PatternFilters):
         all_gain = 1 * (self.mat_clip1 == 0) & (self.mat_clip2 != 0)  #gained everything
         loss_outliers = self.mat_diff_norm < self.lower_bound  #lower bound of normalized change
         gain_outliers = self.mat_diff_norm > self.upper_bound  #upper bound of normalized change
-        flag_loss_block = all_loss & loss_outliers
-        flag_gain_block = all_gain & gain_outliers
-        pct = self.mov_wind2(flag_loss_block, 5)
-        flag_loss_block = (pct > neighbor_threshold) & self.overlap_conditional & all_loss  #ensures neighbor threshold and overlap, plus from an all_loss cell
-        self.flag_loss_block = flag_loss_block.copy()
-        pct = self.mov_wind2(flag_gain_block, 5)
-        flag_gain_block = (pct >neighbor_threshold) & self.overlap_conditional & all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
-        self.flag_gain_block = flag_gain_block.copy()
+        basin_loss = all_loss & loss_outliers
+        basin_gain = all_gain & gain_outliers
+        pct = self.mov_wind2(basin_loss, moving_window_size)
+        basin_loss = (pct > neighbor_threshold) & self.overlap_conditional & all_loss  #ensures neighbor threshold and overlap, plus from an all_loss cell
+        self.flag_basin_loss = basin_loss.copy()
+        pct = self.mov_wind2(basin_gain, moving_window_size)
+        basin_gain = (pct >neighbor_threshold) & self.overlap_conditional & all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
+        self.flag_basin_gain = basin_gain.copy()
 
-    def hypsometry(self):
+    def hypsometry(self, moving_window_size, neighbor_threshold):
         print('entering hypsometry')
         # where bare ground is NOT occuring on both dates - i.e. snow is present in at least one date
         snow_present_mask = ~((np.absolute(self.mat_clip1).round(2)==0.0) & (np.absolute(self.mat_clip2).round(2)==0.0))
@@ -526,10 +533,15 @@ class Flags(MultiArrayOverlap, PatternFilters):
             except IndexError:
                 pass
 
-        self.flag_elevation_gain = self.mat_diff_norm > upper_compare_array
-        self.flag_elevation_gain[(~overlap_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
-        self.flag_elevation_loss = self.mat_diff_norm < lower_compare_array
-        self.flag_elevation_loss[(~overlap_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
+        elevation_gain = self.mat_diff_norm > upper_compare_array
+        elevation_gain[(~overlap_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
+        pct = self.mov_wind2(elevation_gain, moving_window_size)
+        self.flag_elevation_gain = (pct > neighbor_threshold) & elevation_gain
+
+        elevation_loss = self.mat_diff_norm < lower_compare_array
+        elevation_loss[(~overlap_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
+        pct = self.mov_wind2(elevation_loss, moving_window_size)
+        self.flag_elevation_loss = (pct > neighbor_threshold) & elevation_loss
 
     def snowline(self):
         # use overlap_conditional mask for snowline because we want to get average snow per elevation band INCLUDING zero snow depth
@@ -567,15 +579,20 @@ class Flags(MultiArrayOverlap, PatternFilters):
             names:      list of strings.  names of flags saved as boolean matrice attributes
         """
         flag_names = []
-        for i in range(len(names)):
-            flag_names.append('flag_' + names[i])
-            flagged = getattr(self, flag_names[i])
-            if i == 0:
-                flag_combined = flagged
+        print(names)
+        for name in names:
+            if name not in ['basin_block', 'elevation_block']:
+                flag_names.append('flag_' + name)
+                # flagged = getattr(self, flag_names[i])
             else:
-                flag_combined = flag_combined | flagged
-        self.flag_combined = flag_combined
-        self.flag_names = flag_names  #just accumulates all names into a list
+                if name in ['basin_block']:
+                    flag_names.append('flag_basin_loss')
+                    flag_names.append('flag_basin_gain')
+                elif name in ['elevation_block']:
+                    flag_names.append('flag_elevation_loss')
+                    flag_names.append('flag_elevation_gain')
+            self.flag_names = flag_names  #just accumulates all names into a list
+            print(self.flag_names)
 
 
     def __repr__(self):

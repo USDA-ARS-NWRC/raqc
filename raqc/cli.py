@@ -26,7 +26,7 @@ def main():
     # this initiates raqc object with file paths
     raqc_obj = multi_array.Flags(cfg['files']['file_path_in_date1'], cfg['files']['file_path_in_date2'],
                 cfg['files']['file_path_topo'], cfg['files']['file_path_out'], cfg['files']['file_name_modifier'])
-
+    # if files passed are already clipped to each other, then no need to repeat
     if not raqc_obj.already_clipped:
         print('why are we clipping?')
         raqc_obj.clip_extent_overlap()
@@ -44,21 +44,23 @@ def main():
     # if user specified histogram outliers in user config
     if 'hist' in flags:
         histogram_mats = cfg['histogram_outliers']['histogram_mats']
-        bin_dims = cfg['histogram_outliers']['bin_dims']
-        raqc_obj.hist2d_with_bins_mapped(histogram_mats, bin_dims)
+        num_bins = cfg['histogram_outliers']['num_bins']
+        raqc_obj.hist2d_with_bins_mapped(histogram_mats, num_bins)
 
         threshold_histogram_space = cfg['histogram_outliers']['threshold_histogram_space']
         moving_window_name = cfg['histogram_outliers']['moving_window_name']
         moving_window_size = cfg['histogram_outliers']['moving_window_size']
         raqc_obj.outliers_hist(threshold_histogram_space, moving_window_name, moving_window_size)  # INICHECK
     # if user wants to check for blocks
-    for flag in ['loss_block', 'gain_block']:
+    for flag in ['basin_block', 'elevation_block']:
         if flag in flags:
             block_window_size = cfg['block_behavior']['moving_window_size']
             block_window_threshold = cfg['block_behavior']['neighbor_threshold']
-            raqc_obj.flag_blocks(block_window_size, block_window_threshold)
-            break
-    raqc_obj.hypsometry()
+            if flag == 'basin_block':
+                raqc_obj.flag_blocks(block_window_size, block_window_threshold)
+            elif flag == 'elevation_block':
+                raqc_obj.hypsometry(block_window_size, block_window_threshold)
+
     raqc_obj.combine_flags(flags)  # makes a combined flags map (which is not output), but also collects list of flag names for later
     file_out = cfg['files']['file_path_out']
     raqc_obj.save_tiff(file_out)
