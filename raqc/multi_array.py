@@ -8,6 +8,7 @@ import sys, os
 from subprocess import run
 from netCDF4 import Dataset
 import numpy_groupies as npg
+import time
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, file_name_modifier):
@@ -277,6 +278,7 @@ class MultiArrayOverlap(object):
             argv:  list of strings of attribute names if don't want default
 
         """
+        tick = time.clock()
         flag_names = self.flag_names.copy()
         flag_names.append('mat_diff_norm_nans')  # 1)Change here and @2 if desire to save single band
         self.meta.update({
@@ -289,6 +291,8 @@ class MultiArrayOverlap(object):
                 except ValueError:
                     mat_temp = getattr(self, flag_names[id - 1])
                     dst.write_band(id, mat_temp.astype('float32'))
+        tock = time.clock()
+        print('save tiff = ', tock - tick, 'seconds')
 
     def make_diff_mat(self):
         """
@@ -329,6 +333,7 @@ class PatternFilters():
          """
 
         print('entered histogram moving window')
+        tick = time.clock()
         if isinstance(name, str):
             mat = getattr(self, name)
         else:
@@ -365,6 +370,8 @@ class PatternFilters():
                 base_col = np.ravel(np.tile(col_idx, (len(row_idx),1))) + j
                 sub = mat[base_row, base_col]
                 pct[i,j] = (np.sum(sub > 0)) / sub.shape[0]
+        tock = time.clock()
+        print('mov_wind zach version = ', tock - tick, 'seconds')
         return(pct)
 
     def mov_wind2(self, name, size):
@@ -413,6 +420,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         """
 
         # I don't think an array with nested tuples is computationally efficient.  Find better data structure for the tuple_array
+        tick = time.clock()
         m1, m2 = getattr(self, name[0]), getattr(self, name[1])
         self.mat_shape = m1.shape
         m1_nan, m2_nan = m1[self.overlap_conditional], m2[self.overlap_conditional]
@@ -437,6 +445,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.bin_loc = tuple_array  #array of tuples containing 0 to N x,y coordinates of overlapping snow map
                                     #locations contributing to 2d histogram bins
         self.xedges, self.yedges, self.bins = xedges, yedges, bins
+        tock = time.clock()
+        print('hist2D_with_bins_mapped = ', tock - tick, 'seconds')
     def outliers_hist(self, thresh, moving_window_name, moving_window_size):
         """
         Finds spatial outliers in histogram and bins below a threshold bin count.
@@ -460,6 +470,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         unpacks histogram bins onto their contributing map locations (self.outliers_hist_space).
         Data type is a list of x,y coordinate pairs
         """
+        tick = time.clock()
         hist_outliers = np.zeros(self.mat_shape, dtype = int)
         idarr = np.where(self.outliers_hist_space)
         for i in range(len(idarr[0])):  # iterate through all bins with tuples
@@ -468,6 +479,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 pair = loc_tuple[j]
                 hist_outliers[pair[0], pair[1]] = 1
         self.flag_hist = hist_outliers  # unpacked map-space locations of outliers
+        tock = time.clock()
+        print('hist_to_map_space = ', tock - tick, 'seconds')
 
     def flag_blocks(self, moving_window_size, neighbor_threshold):
         """
