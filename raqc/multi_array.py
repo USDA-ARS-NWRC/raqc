@@ -9,6 +9,7 @@ from subprocess import run
 from netCDF4 import Dataset
 import numpy_groupies as npg
 import time
+from pandas import to_datetime
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, file_name_modifier):
@@ -17,6 +18,15 @@ class MultiArrayOverlap(object):
         self.already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2)
         # already_clipped2 = 'common_extent.tif' == file_path_dataset2[file_path_dataset2.index('common'):]
         # save file paths needed for clipping
+
+        #Ensure that date1 occurs before date2
+        check_chronology1 = to_datetime(file_path_dataset1.split('/')[-1].split('_')[0][-8:], format = '%Y%m%d')
+        check_chronology2 = to_datetime(file_path_dataset2.split('/')[-1].split('_')[0][-8:], format = '%Y%m%d')
+        if check_chronology1 < check_chronology2:
+            pass
+        else:
+            sys.exit("Date 1 must occur before Date 2. Exiting program")
+
         if not self.already_clipped:
             self.file_path_dataset1 = file_path_dataset1
             self.file_path_dataset2 = file_path_dataset2
@@ -280,7 +290,9 @@ class MultiArrayOverlap(object):
         """
         tick = time.clock()
         flag_names = self.flag_names.copy()
+        print(flag_names)
         flag_names.append('mat_diff_norm_nans')  # 1)Change here and @2 if desire to save single band
+        print('after append ', flag_names)
         self.meta.update({
             'count': len(flag_names)})
 
@@ -304,7 +316,7 @@ class MultiArrayOverlap(object):
         mat_clip2 = self.mat_clip2.copy()
 
         self.mat_diff = mat_clip2 - mat_clip1  # raw difference
-        mat_clip1[(mat_clip1 < 0.25) & (mat_clip1 != -9999)] = 0.25  # Set snow depths below 0.25m to 0.25m to avoid dividing by zero
+        mat_clip1[(mat_clip1 < 0.25) & ((mat_clip1 != -9999) | (~np.isnan(mat_clip1)))] = 0.25  # Set snow depths below 0.25m to 0.25m to avoid dividing by zero
         mat_diff_norm = np.round((self.mat_diff / mat_clip1), 2)  #
         self.mat_diff_norm = mat_diff_norm
         mat_diff_norm_nans = mat_diff_norm.copy()
@@ -493,36 +505,53 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
 
         """
+
         all_loss = 1 * (self.mat_clip1 != 0) & (self.mat_clip2 == 0)  #lost everything
         all_gain = 1 * (self.mat_clip1 == 0) & (self.mat_clip2 != 0)  #gained everything
-        loss_outliers = self.mat_diff_norm < self.lower_bound  #lower bound of normalized change
-        gain_outliers = self.mat_diff_norm > self.upper_bound  #upper bound of normalized change
-        basin_loss = all_loss & loss_outliers
-        basin_gain = all_gain & gain_outliers
-        pct = self.mov_wind2(basin_loss, moving_window_size)
-        basin_loss = (pct > neighbor_threshold) & self.overlap_conditional & all_loss  #ensures neighbor threshold and overlap, plus from an all_loss cell
+        # loss_outliers = self.mat_diff_norm < self.lower_bound  #lower bound of normalized change
+        # gain_outliers = self.mat_diff_norm > self.upper_bound  #upper bound of normalized change
+        # basin_loss = all_loss & loss_outliers
+        # basin_gain = all_gain & gain_outliers
+        # pct = self.mov_wind2(basin_loss, moving_window_size)
+        basin_loss = self.overlap_nan & all_loss  #ensures neighbor threshold and overlap, plus from an all_loss cell
         self.flag_basin_loss = basin_loss.copy()
-        pct = self.mov_wind2(basin_gain, moving_window_size)
-        basin_gain = (pct >neighbor_threshold) & self.overlap_conditional & all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
+        # pct = self.mov_wind2(basin_gain, moving_window_size)
+        basin_gain = self.overlap_nan & all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
         self.flag_basin_gain = basin_gain.copy()
+
+        # add this to basin_gain and basin_loss
+        self.flag_hist = self.flag_hist & (all_loss | all_gain)
+
+        # all_loss = 1 * (self.mat_clip1 != 0) & (self.mat_clip2 == 0)  #lost everything
+        # all_gain = 1 * (self.mat_clip1 == 0) & (self.mat_clip2 != 0)  #gained everything
+        # loss_outliers = self.mat_diff_norm < self.lower_bound  #lower bound of normalized change
+        # gain_outliers = self.mat_diff_norm > self.upper_bound  #upper bound of normalized change
+        # basin_loss = all_loss & loss_outliers
+        # basin_gain = all_gain & gain_outliers
+        # pct = self.mov_wind2(basin_loss, moving_window_size)
+        # basin_loss = (pct > neighbor_threshold) & self.overlap_nan & all_loss  #ensures neighbor threshold and overlap, plus from an all_loss cell
+        # self.flag_basin_loss = basin_loss.copy()
+        # pct = self.mov_wind2(basin_gain, moving_window_size)
+        # basin_gain = (pct >neighbor_threshold) & self.overlap_nan & all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
+        # self.flag_basin_gain = basin_gain.copy()
 
     def hypsometry(self, moving_window_size, neighbor_threshold):
         print('entering hypsometry')
         # where bare ground is NOT occuring on both dates - i.e. snow is present in at least one date
         snow_present_mask = ~((np.absolute(self.mat_clip1).round(2)==0.0) & (np.absolute(self.mat_clip2).round(2)==0.0))
-        overlap_and_snow_present_mask = snow_present_mask & self.overlap_conditional  # combine conditional map with snow present
+        nan_and_snow_present_mask = snow_present_mask & self.overlap_nan  # combine conditional map with snow present
         # Masking bare ground areas because zero change in snow depth will skew distribution from which thresholds are based
-        topo_clip_masked = self.topo_clip[overlap_and_snow_present_mask]
-        mat_diff_norm_masked = self.mat_diff_norm[overlap_and_snow_present_mask]
+        topo_clip_masked = self.topo_clip[nan_and_snow_present_mask]
+        mat_diff_norm_masked = self.mat_diff_norm[nan_and_snow_present_mask]
 
         self.snowline()
         id_dem = np.digitize(topo_clip_masked, self.elevation_edges) -1  #creates bin edge ids.  the '-1' converts to index starting at zero
         id_dem[id_dem == self.elevation_edges.shape[0]]  = self.elevation_edges.shape[0] - 1 #for some there are as many bins as edges.  this smooshes last bin(the max) into second to last bin edge
         id_dem_unique = np.unique(id_dem)  #unique ids
-        map_id_dem = np.full(overlap_and_snow_present_mask.shape, id_dem_unique[-1] + 1, dtype=int)  # makes nans max(id_dem) + 1
-        map_id_dem[overlap_and_snow_present_mask] = id_dem
+        map_id_dem = np.full(nan_and_snow_present_mask.shape, id_dem_unique[-1] + 1, dtype=int)  # makes nans max(id_dem) + 1
+        map_id_dem[nan_and_snow_present_mask] = id_dem
 
-        map_id_dem_overlap = map_id_dem[overlap_and_snow_present_mask]
+        map_id_dem_overlap = map_id_dem[nan_and_snow_present_mask]
         elevation_std = np.full(id_dem_unique.shape, -9999, dtype = float)
         elevation_mean = np.full(id_dem_unique.shape, -9999, dtype = float)
         for id, id_dem_unique2 in enumerate(id_dem_unique):
@@ -534,8 +563,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
         print('thresh upper', thresh_upper)
         print('thresh lower ', thresh_lower)
 
-        upper_compare_array = np.zeros(overlap_and_snow_present_mask.shape)   #this will be a map populated with change threshold at each map location based on elevation thresh
-        lower_compare_array = np.zeros(overlap_and_snow_present_mask.shape)   #this will be a map populated with change threshold at each map location based on elevation thresh
+        upper_compare_array = np.zeros(nan_and_snow_present_mask.shape)   #this will be a map populated with change threshold at each map location based on elevation thresh
+        lower_compare_array = np.zeros(nan_and_snow_present_mask.shape)   #this will be a map populated with change threshold at each map location based on elevation thresh
         for id, id_dem_unique2 in enumerate(id_dem_unique):
             try:
                 upper_compare_array[map_id_dem == id_dem_unique2] = thresh_upper[id]
@@ -547,18 +576,18 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 pass
 
         elevation_gain = self.mat_diff_norm > upper_compare_array
-        elevation_gain[(~overlap_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
+        elevation_gain[(~nan_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
         pct = self.mov_wind2(elevation_gain, moving_window_size)
         self.flag_elevation_gain = (pct > neighbor_threshold) & elevation_gain
 
         elevation_loss = self.mat_diff_norm < lower_compare_array
-        elevation_loss[(~overlap_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
+        elevation_loss[(~nan_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
         pct = self.mov_wind2(elevation_loss, moving_window_size)
         self.flag_elevation_loss = (pct > neighbor_threshold) & elevation_loss
 
     def snowline(self):
-        # use overlap_conditional mask for snowline because we want to get average snow per elevation band INCLUDING zero snow depth
-        topo_clip_conditional = self.topo_clip[self.overlap_conditional]
+        # use overlap_nan mask for snowline because we want to get average snow per elevation band INCLUDING zero snow depth
+        topo_clip_conditional = self.topo_clip[self.overlap_nan]
         min_elev, max_elev = np.min(topo_clip_conditional), np. max(topo_clip_conditional)
         dem_resolution = 50
         edge_min = min_elev % dem_resolution
@@ -568,20 +597,37 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.elevation_edges = np.arange(edge_min, edge_max + 0.1, dem_resolution)
         id_dem = np.digitize(topo_clip_conditional, self.elevation_edges) -1
         id_dem_unique = np.unique(id_dem)
-        map_id_dem = np.full(self.overlap_conditional.shape, id_dem_unique[-1] + 1, dtype=int)  # makes nans max(id_dem) + 1
-        map_id_dem[self.overlap_conditional] = id_dem
+        map_id_dem = np.full(self.overlap_nan.shape, id_dem_unique[-1] + 1, dtype=int)  # makes nans max(id_dem) + 1
+        map_id_dem[self.overlap_nan] = id_dem
         snowline_mean = np.full(id_dem_unique.shape, -9999, dtype = 'float')
+        snowline_std = np.full(id_dem_unique.shape, -9999, dtype = 'float')
         # use the matrix with the deepest mean basin snow depth to base snowline thresh off of.  Assuming deeper avg basin snow = lower snowline
-        if np.mean(self.mat_clip1[self.overlap_conditional]) > np.mean(self.mat_clip1[self.overlap_conditional]):
-            mat = self.mat_clip1[self.overlap_conditional]
+        if np.mean(self.mat_clip1[self.overlap_nan]) > np.mean(self.mat_clip1[self.overlap_nan]):
+            mat_temp = self.mat_clip1
+            mat = mat_temp[self.overlap_nan]
+            mat_temp[self.overlap_nan & mat_temp ]
         else:
-            mat = self.mat_clip2[self.overlap_conditional]
-        map_id_dem2_masked = map_id_dem[self.overlap_conditional]
+            mat_temp = self.mat_clip2
+            mat = mat_temp[self.overlap_nan]
+        map_id_dem2_masked = map_id_dem[self.overlap_nan]
         for id, id_dem_unique2 in enumerate(id_dem_unique):
             snowline_mean[id] = getattr(mat[map_id_dem2_masked == id_dem_unique2], 'mean')()
+            snowline_std[id] = getattr(mat[map_id_dem2_masked == id_dem_unique2], 'std')()
         id_min = np.min(np.where(snowline_mean > 0.40))
-        print('snowline elevation is: ', self.elevation_edges[id_min])
         self.snowline_elev = self.elevation_edges[id_min]  #elevation of estimated snowline
+
+        # print('snowline mean ', snowline_mean)
+        # print('elevation ', self.elevation_edges)
+        # print('snowline elevation is: ', self.elevation_edges[id_min])
+        # compare_array = np.zeros(self.overlap_nan.shape)   #this will be a map populated with change threshold at each map location based on elevation thresh
+        # for id, id_dem_unique2 in enumerate(id_dem_unique):
+        #     try:
+        #         compare_array[map_id_dem == id_dem_unique2] = snowline_mean[id]
+        #     except IndexError:
+        #         pass
+        # print(self.flag_basin_loss.shape, )
+        # self.flag_basin_loss = self.flag_basin_loss & (mat_temp > compare_array)
+
 
     def combine_flags(self, names):
         """

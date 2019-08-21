@@ -32,12 +32,12 @@ def main():
         raqc_obj.clip_extent_overlap()
 
     raqc_obj.make_diff_mat()
-
     name = cfg['difference_arrays']['name']
     action = cfg['difference_arrays']['action']
     operator = cfg['difference_arrays']['operator']
     val = cfg['difference_arrays']['val']
     raqc_obj.mask_advanced(name, action, operator, val)
+
 
     # Gather all flags specified in config
     flags = cfg['flags']['flags']
