@@ -15,7 +15,7 @@ class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, file_name_modifier):
         # First check if user passed already clipped repeat array file paths
         string_match = 'common_extent'
-        self.already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2)
+        already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2)
         # already_clipped2 = 'common_extent.tif' == file_path_dataset2[file_path_dataset2.index('common'):]
         # save file paths needed for clipping
 
@@ -27,7 +27,7 @@ class MultiArrayOverlap(object):
         else:
             sys.exit("Date 1 must occur before Date 2. Exiting program")
 
-        if not self.already_clipped:
+        if not already_clipped:
             self.file_path_dataset1 = file_path_dataset1
             self.file_path_dataset2 = file_path_dataset2
             self.file_path_topo = file_path_topo
@@ -37,7 +37,7 @@ class MultiArrayOverlap(object):
         with rio.open(file_path_dataset1) as src:
             self.d1 = src
             self.meta = self.d1.profile
-            if self.already_clipped:
+            if already_clipped:
                 mat_clip1 = self.d1.read()  #matrix
                 mat_clip1 = mat_clip1[0]
                 mat_clip1[np.isnan(mat_clip1)] = -9999
@@ -45,12 +45,12 @@ class MultiArrayOverlap(object):
         with rio.open(file_path_dataset2) as src:
             self.d2 = src
             self.meta2 = self.d2.profile
-            if self.already_clipped:
+            if already_clipped:
                 mat_clip2 = self.d2.read()  #matrix
                 mat_clip2 = mat_clip2[0]
                 mat_clip2[np.isnan(mat_clip2)] = -9999
                 self.mat_clip2 = mat_clip2
-        if self.already_clipped:
+        if already_clipped:
             with rio.open(file_path_topo) as src:
                 topo = src
                 topo_clip = topo.read()
@@ -456,7 +456,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 tuple_array[idyb[i], idxb[i]].append([idmr[i], idmc[i]])  #appends map space indices into bin space
         self.bin_loc = tuple_array  #array of tuples containing 0 to N x,y coordinates of overlapping snow map
                                     #locations contributing to 2d histogram bins
-        self.xedges, self.yedges, self.bins = xedges, yedges, bins
         tock = time.clock()
         print('hist2D_with_bins_mapped = ', tock - tick, 'seconds')
     def outliers_hist(self, thresh, moving_window_name, moving_window_size):
@@ -496,8 +495,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
     def flag_blocks(self, moving_window_size, neighbor_threshold):
         """
-        Finds spatially continuous blocks or areas of complete melt, or snow where none existed prior.
-        Used to diagnose tiles of extreme, unrealistic change that were potentially processed incorrectly as tiles
+        Finds cells of complete melt, or snow where none existed prior.
+        Used to diagnose extreme, unrealistic change that were potentially processed incorrectly
 
         Args:
             moving_window_size:   size of moving window used to define blocks
@@ -505,23 +504,19 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
 
         """
-
-        all_loss = 1 * (self.mat_clip1 != 0) & (self.mat_clip2 == 0)  #lost everything
-        all_gain = 1 * (self.mat_clip1 == 0) & (self.mat_clip2 != 0)  #gained everything
-        # loss_outliers = self.mat_diff_norm < self.lower_bound  #lower bound of normalized change
-        # gain_outliers = self.mat_diff_norm > self.upper_bound  #upper bound of normalized change
-        # basin_loss = all_loss & loss_outliers
-        # basin_gain = all_gain & gain_outliers
-        # pct = self.mov_wind2(basin_loss, moving_window_size)
+        # Note below ensures -0.0 and 0 and 0.0 are all discovered and flagged as zeros.
+        # Checked variations of '==0.0' and found that could have more decimals or be ==0 with same resultant boolean
+        all_loss = (np.absolute(self.mat_clip1).round(2)!=0.0) & (np.absolute(self.mat_clip2).round(2)==0.0)
+        all_gain = (np.absolute(self.mat_clip1).round(2)==0.0) & (np.absolute(self.mat_clip2).round(2)!=0.0)
         basin_loss = self.overlap_nan & all_loss  #ensures neighbor threshold and overlap, plus from an all_loss cell
         self.flag_basin_loss = basin_loss.copy()
-        # pct = self.mov_wind2(basin_gain, moving_window_size)
         basin_gain = self.overlap_nan & all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
         self.flag_basin_gain = basin_gain.copy()
 
         # add this to basin_gain and basin_loss
         self.flag_hist = self.flag_hist & (all_loss | all_gain)
 
+        # Old Version with moving_window and bounds
         # all_loss = 1 * (self.mat_clip1 != 0) & (self.mat_clip2 == 0)  #lost everything
         # all_gain = 1 * (self.mat_clip1 == 0) & (self.mat_clip2 != 0)  #gained everything
         # loss_outliers = self.mat_diff_norm < self.lower_bound  #lower bound of normalized change
