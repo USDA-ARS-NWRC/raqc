@@ -455,6 +455,47 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                     #locations contributing to 2d histogram bins
         tock = time.clock()
         print('hist2D_with_bins_mapped = ', tock - tick, 'seconds')
+
+    def hist2d_with_bins_mapped_v2(self, name, nbins):
+        """
+        basically creates all components necessary to create historgram using np.histogram2d, and saves map locations
+        when locations from matrix contributing to pertinent bins on histogram are needed. Hope to all that is holy \
+        I don't have to mess with this one again!
+
+        Args:
+            name:       names of two matrices (list of strings) used to build 2D histogram, ordered <name x, name y>.
+            nbins:      list of number of bins in x and y axis
+
+        """
+
+        # I don't think an array with nested tuples is computationally efficient.  Find better data structure for the tuple_array
+        tick = time.clock()
+        m1, m2 = getattr(self, name[0]), getattr(self, name[1])
+        self.mat_shape = m1.shape
+        m1_nan, m2_nan = m1[self.overlap_conditional], m2[self.overlap_conditional]
+        bins, xedges, yedges = np.histogram2d(np.ravel(m1_nan), np.ravel(m2_nan), nbins)
+        # except TypeError: unorderable types:
+
+        # Now find bin edges of overlapping snow depth locations from both dates, and save to self.bin_loc as array of tuples
+        xedges = np.delete(xedges, -1)   # remove the last edge
+        yedges = np.delete(yedges, -1)
+        bins = np.flip(np.rot90(bins,1), 0)  # WTF np.histogram2d.  hack to fix bin mat orientation
+        self.bins, self.xedges, self.yedges = bins, xedges, yedges
+        # Note: subtract 1 to go from 1 to N to 0 to N - 1 (makes indexing possible below)
+        idxb = np.digitize(m1_nan, xedges) -1  # id of x bin edges.  dims = (N,) array
+        idyb = np.digitize(m2_nan, yedges) -1  # id of y bin edges
+        tuple_array = np.empty((nbins[1], nbins[0]), dtype = object)
+        id = np.where(self.overlap_conditional)  # coordinate locations of mat used to generate hist
+        idmr, idmc = id[0], id[1]  # idmat row and col
+        for i in range(idyb.shape[0]):
+                if type(tuple_array[idyb[i], idxb[i]]) != list:  #initiate list if does not exist
+                    tuple_array[idyb[i], idxb[i]] = []
+                tuple_array[idyb[i], idxb[i]].append([idmr[i], idmc[i]])  #appends map space indices into bin space
+        self.bin_loc = tuple_array  #array of tuples containing 0 to N x,y coordinates of overlapping snow map
+                                    #locations contributing to 2d histogram bins
+        tock = time.clock()
+        print('hist2D_with_bins_mapped = ', tock - tick, 'seconds')
+
     def outliers_hist(self, thresh, moving_window_name, moving_window_size):
         """
         Finds spatial outliers in histogram and bins below a threshold bin count.
@@ -512,7 +553,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.flag_basin_gain = basin_gain.copy()
 
         # add this to basin_gain and basin_loss to fix insufficient histogram flag finder
-        self.flag_hist = self.flag_hist & (all_loss | all_gain)
+        if hasattr(self, 'self.bin_loc'):
+            self.flag_hist = self.flag_hist & (all_loss | all_gain)
 
         # Old Version with moving_window and bounds
         # all_loss = 1 * (self.mat_clip1 != 0) & (self.mat_clip2 == 0)  #lost everything
@@ -558,8 +600,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
             thresh_raw_upper[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2],90)
             # elevation_std[id] = getattr(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], 'std')()
 
+        print('upper norm', thresh_norm_upper)
         print('upper raw', thresh_raw_upper)
-        print('lower raw', thresh_raw_lower)
+        print('lower norm', thresh_raw_lower)
 
         upper_compare_array_norm = np.zeros(nan_and_snow_present_mask.shape)   #this will be a map populated with change threshold at each map location based on elevation thresh
         lower_compare_array_norm = np.zeros(nan_and_snow_present_mask.shape)   #this will be a map populated with change threshold at each map location based on elevation thresh
@@ -582,7 +625,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         pct = self.mov_wind2(elevation_gain, moving_window_size)
         self.flag_elevation_gain = (pct > neighbor_threshold) & elevation_gain
 
-        elevation_loss = (self.mat_diff_norm < lower_compare_array_norm) & (self.mat_diff < lower_compare_array_raw)
+        elevation_loss = self.mat_diff < lower_compare_array_raw
         elevation_loss[(~nan_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
         pct = self.mov_wind2(elevation_loss, moving_window_size)
         self.flag_elevation_loss = (pct > neighbor_threshold) & elevation_loss
