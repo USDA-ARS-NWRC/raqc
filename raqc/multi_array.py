@@ -548,9 +548,11 @@ class Flags(MultiArrayOverlap, PatternFilters):
         all_gain = (np.absolute(self.mat_clip1).round(2)==0.0) & (np.absolute(self.mat_clip2).round(2)!=0.0)
         self.snowline()
         basin_loss = self.overlap_nan & all_loss & (self.topo_clip > self.snowline_elev) #ensures neighbor threshold and overlap, plus from an all_loss cell
-        self.flag_basin_loss = basin_loss.copy()
+        pct = self.mov_wind2(basin_loss, 5)
+        self.flag_basin_loss = (pct > 0.39) & all_loss
         basin_gain = self.overlap_nan & all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
-        self.flag_basin_gain = basin_gain.copy()
+        pct = self.mov_wind2(basin_gain, 5)
+        self.flag_basin_gain = (pct > 0.39) & all_gain
 
         # add this to basin_gain and basin_loss to fix insufficient histogram flag finder
         if hasattr(self, 'self.bin_loc'):
@@ -594,10 +596,10 @@ class Flags(MultiArrayOverlap, PatternFilters):
         for id, id_dem_unique2 in enumerate(id_dem_unique):
             temp = mat_diff_norm_masked
             temp2 = mat_diff_masked
-            thresh_norm_lower[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2],10)
-            thresh_norm_upper[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2],90)
-            thresh_raw_lower[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2],10)
-            thresh_raw_upper[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2],90)
+            thresh_norm_lower[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2],5)
+            thresh_norm_upper[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2],95)
+            thresh_raw_lower[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2],5)
+            thresh_raw_upper[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2],95)
             # elevation_std[id] = getattr(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], 'std')()
 
         print('upper norm', thresh_norm_upper)
@@ -621,12 +623,13 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 pass
 
         elevation_gain = (self.mat_diff_norm > upper_compare_array_norm) & (self.mat_diff > upper_compare_array_raw)
-        elevation_gain[(~nan_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
+        # elevation_gain[(~nan_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
+        elevation_gain[~nan_and_snow_present_mask] = False
         pct = self.mov_wind2(elevation_gain, moving_window_size)
         self.flag_elevation_gain = (pct > neighbor_threshold) & elevation_gain
 
         elevation_loss = self.mat_diff < lower_compare_array_raw
-        elevation_loss[(~nan_and_snow_present_mask) | (self.topo_clip <= self.snowline_elev)] = False
+        elevation_loss[~nan_and_snow_present_mask] = False
         pct = self.mov_wind2(elevation_loss, moving_window_size)
         self.flag_elevation_loss = (pct > neighbor_threshold) & elevation_loss
 
