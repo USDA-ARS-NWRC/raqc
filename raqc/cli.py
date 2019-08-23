@@ -45,12 +45,12 @@ def main():
     if 'hist' in flags:
         histogram_mats = cfg['histogram_outliers']['histogram_mats']
         num_bins = cfg['histogram_outliers']['num_bins']
-        raqc_obj.hist2d_with_bins_mapped(histogram_mats, num_bins)
-
+        # raqc_obj.hist2d_with_bins_mapped(histogram_mats, num_bins)
         threshold_histogram_space = cfg['histogram_outliers']['threshold_histogram_space']
         moving_window_name = cfg['histogram_outliers']['moving_window_name']
         moving_window_size = cfg['histogram_outliers']['moving_window_size']
-        raqc_obj.outliers_hist(threshold_histogram_space, moving_window_name, moving_window_size)  # INICHECK
+        raqc_obj.make_hist(histogram_mats, num_bins, threshold_histogram_space, moving_window_size)
+        # raqc_obj.outliers_hist(threshold_histogram_space, moving_window_name, moving_window_size)  # INICHECK
     # if user wants to check for blocks
     for flag in ['basin_block', 'elevation_block']:
         if flag in flags:
