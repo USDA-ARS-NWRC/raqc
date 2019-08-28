@@ -17,7 +17,7 @@ class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, file_name_modifier):
         # First check if user passed already clipped repeat array file paths
 
-        string_match = 'common_extent'
+        string_match = 'clipped_to'
         self.already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2)
         # self.already_clipped2 = 'common_extent.tif' == file_path_dataset2[file_path_dataset2.index('common'):]
         # save file paths needed for clipping
@@ -113,11 +113,23 @@ class MultiArrayOverlap(object):
         right_min_bound = right_min_bound - (right_min_bound % round(rez))
         top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
 
-        file_name_dataset1_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset1).split('/')[-1])[0] + '_common_extent.tif'
-        file_name_dataset1_te = self.file_out_root + file_name_dataset1_te_temp
-        file_name_dataset2_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset2).split('/')[-1])[0] + '_common_extent.tif'
-        file_name_dataset2_te = self.file_out_root + file_name_dataset2_te_temp
+
+        # file_name_dataset1_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset1).split('/')[-1])[0] + '_common_extent.tif'
+        # file_name_dataset1_te = self.file_out_root + file_name_dataset1_te_temp
+        # file_name_dataset2_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset2).split('/')[-1])[0]
+        # file_name_dataset2_te = self.file_out_root + file_name_dataset2_te_temp
+        file_name_dataset1_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset1).split('/')[-1])[0]   #everythong after last / without filename ext (i.e. .tif)
         id_date_start = file_name_dataset1_te_temp.index('2')  #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
+        file_name_dataset1_te_first = os.path.splitext(file_name_dataset1_te_temp)[0][:id_date_start + 8]
+        file_name_dataset1_te_second = os.path.splitext(file_name_dataset1_te_temp)[0][id_date_start:]
+        file_name_dataset2_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset2).split('/')[-1])[0]
+        file_name_dataset2_te_first = os.path.splitext(file_name_dataset2_te_temp)[0][:id_date_start + 8]
+        file_name_dataset2_te_second = os.path.splitext(file_name_dataset2_te_temp)[0][id_date_start:]
+        file_name_dataset1_te = self.file_out_root + file_name_dataset1_te_first + '_clipped_to_' + file_name_dataset2_te_second
+        file_name_dataset2_te = self.file_out_root + file_name_dataset2_te_first + '_clipped_to_' + file_name_dataset1_te_second
+
+        file_name_dataset2_te = self.file_out_rout + os.path.splitext(file_name_dataset1_te_temp)[0][:id_date_start + 8] + '_clipped_to_' +  \
+                file_name_dataset2_te_temp + '_common_extent.tif'
         file_base_topo_te = os.path.splitext(file_name_dataset1_te_temp)[0][:id_date_start + 8] + '_to_' +  \
                             os.path.splitext(file_name_dataset2_te_temp)[0][id_date_start: id_date_start + 8]
         # file_base_topo_te = self.file_path_dataset1.split('/')[-3] + '_' + self.file_path_dataset1.split('/')[-2]
@@ -133,6 +145,8 @@ class MultiArrayOverlap(object):
                 if response.lower() == 'yes':
                     run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
                                                                             self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
+                    # run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
+                    #                                                         self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
                     run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
                                                                             self.file_path_dataset2, file_name_dataset2_te) + ' -overwrite'
                     if topo_rez_same:
@@ -422,45 +436,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
     def init(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, file_name_modifier):
         MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, file_name_modifier)
 
-    def hist2d_with_bins_mapped(self, name, nbins):
-        """
-        basically creates all components necessary to create historgram using np.histogram2d, and saves map locations
-        when locations from matrix contributing to pertinent bins on histogram are needed. Hope to all that is holy \
-        I don't have to mess with this one again!
 
-        Args:
-            name:       names of two matrices (list of strings) used to build 2D histogram, ordered <name x, name y>.
-            nbins:      list of number of bins in x and y axis
-
-        """
-
-        # I don't think an array with nested tuples is computationally efficient.  Find better data structure for the tuple_array
-        tick = time.clock()
-        m1, m2 = getattr(self, name[0]), getattr(self, name[1])
-        self.mat_shape = m1.shape
-        m1_nan, m2_nan = m1[self.overlap_conditional], m2[self.overlap_conditional]
-        bins, xedges, yedges = np.histogram2d(np.ravel(m1_nan), np.ravel(m2_nan), nbins)
-        # except TypeError: unorderable types:
-
-        # Now find bin edges of overlapping snow depth locations from both dates, and save to self.bin_loc as array of tuples
-        xedges = np.delete(xedges, -1)   # remove the last edge
-        yedges = np.delete(yedges, -1)
-        bins = np.flip(np.rot90(bins,1), 0)  # WTF np.histogram2d.  hack to fix bin mat orientation
-        self.bins, self.xedges, self.yedges = bins, xedges, yedges
-        # Note: subtract 1 to go from 1 to N to 0 to N - 1 (makes indexing possible below)
-        idxb = np.digitize(m1_nan, xedges) -1  # id of x bin edges.  dims = (N,) array
-        idyb = np.digitize(m2_nan, yedges) -1  # id of y bin edges
-        tuple_array = np.empty((nbins[1], nbins[0]), dtype = object)
-        id = np.where(self.overlap_conditional)  # coordinate locations of mat used to generate hist
-        idmr, idmc = id[0], id[1]  # idmat row and col
-        for i in range(idyb.shape[0]):
-                if type(tuple_array[idyb[i], idxb[i]]) != list:  #initiate list if does not exist
-                    tuple_array[idyb[i], idxb[i]] = []
-                tuple_array[idyb[i], idxb[i]].append([idmr[i], idmc[i]])  #appends map space indices into bin space
-        self.bin_loc = tuple_array  #array of tuples containing 0 to N x,y coordinates of overlapping snow map
-                                    #locations contributing to 2d histogram bins
-        tock = time.clock()
-        print('hist2D_with_bins_mapped = ', tock - tick, 'seconds')
 
     def make_hist(self, name, nbins, thresh, moving_window_size):
         # I don't think an array with nested tuples is computationally efficient.  Find better data structure for the tuple_array
@@ -498,66 +474,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
         tock = time.clock()
         print('hist2D_with_bins_mapped = ', tock - tick, 'seconds')
 
-    def outliers_hist(self, thresh, moving_window_name, moving_window_size):
-        """
-        Finds spatial outliers in histogram and bins below a threshold bin count.
-        Outputs boolean where these outliers are located in histogram space
-        Args:
-            thresh:     list of three values - 0. bin count threshold below which bins are flagged.
-                        1.  Currently Unused, but areas where complete melt occurs.
-                        2. proportion of neighbors, self.pct, which have values.
-
-        """
-
-        pct = self.mov_wind(moving_window_name, moving_window_size)
-        flag_spatial_outlier = (pct < thresh[0]) & (self.bins > 0)
-        flag_bin_ct = (self.bins < thresh[1]) & (self.bins > 0)  # ability to filter out bin counts lower than thresh but above zero
-        flag = (flag_spatial_outlier | flag_bin_ct)
-        self.outliers_hist_space = flag
-        self.hist_to_map_space()  # unpack hisogram spacconsider adding density option to np.histogram2de outliers to geographic space locations
-
-    def outliers_hist_v2(self, thresh, moving_window_name, moving_window_size):
-
-        pct = self.mov_wind(moving_window_name, moving_window_size)
-        flag_spatial_outlier = (pct < thresh[0]) & (self.bins > 0)
-        flag_bin_ct = (self.bins < thresh[1]) & (self.bins > 0)  # ability to filter out bin counts lower than thresh but above zero
-        flag = (flag_spatial_outlier | flag_bin_ct)
-        self.outliers_hist_space = flag
-        self.hist2d_to_map_space_v2()  # unpack hisogram spacconsider adding density option to np.histogram2de outliers to geographic space locations
-
-    def hist2d_to_map_space_v2(self):
-        tick = time.clock()
-        # edges of outliers in map space
-        id = np.where(self.outliers_hist_space)
-        idx_hist, idy_hist = id[1], id[0]  # column and row id where outliers were found
-        x_vals_hist, y_vals_hist = self.xedges[idx_hist], self.yedges[idy_hist]  # actual values along x, y axis of 2D hist (i.e. depth and norm change)
-        idx_bins = np.digitize(m1_nan, self.xedges) -1  # id of x bin edges.  dims = (N,) array
-        idy_bins = np.digitize(m2_nan, self.yedges) -1  # id of y bin edges
-        hist_outliers_temp = np.zeros(self.mat_shape, dtype = bool)
-        for valx in x_vals_hist:
-            for valy in y_vals_hist:
-                hist_outliers_temp = (idx_bins == valx) & (idy_bins == valy) | hist_outliers_temp
-        self.flag_hist = hist_outliers_temp
-
-
-
-    def hist_to_map_space(self):
-        """
-        unpacks histogram bins onto their contributing map locations (self.outliers_hist_space).
-        Data type is a list of x,y coordinate pairs
-        """
-        tick = time.clock()
-        hist_outliers = np.zeros(self.mat_shape, dtype = int)
-        idarr = np.where(self.outliers_hist_space)
-        for i in range(len(idarr[0])):  # iterate through all bins with tuples
-            loc_tuple = self.bin_loc[idarr[0][i], idarr[1][i]]
-            for j in range(len(loc_tuple)):  # iterate through each tuple within each bin
-                pair = loc_tuple[j]
-                hist_outliers[pair[0], pair[1]] = 1
-        self.flag_hist = hist_outliers  # unpacked map-space locations of outliers
-        tock = time.clock()
-        print('hist_to_map_space = ', tock - tick, 'seconds')
-
     def flag_blocks(self, moving_window_size, neighbor_threshold, snowline_thresh, elevation_band_resolution):
         """
         Finds cells of complete melt, or snow where none existed prior.
@@ -575,6 +491,10 @@ class Flags(MultiArrayOverlap, PatternFilters):
         all_gain = (np.absolute(self.mat_clip1).round(2)==0.0) & (np.absolute(self.mat_clip2).round(2) > 0.0)
         all_loss = self.all_loss.copy()
         self.snowline(snowline_thresh, elevation_band_resolution)
+        if hasattr(self, 'snowline_elev'):
+            pass
+        else:
+            self.snowline(snowline_thresh, elevation_band_resolution)
         basin_loss = self.overlap_nan & all_loss & (self.topo_clip > self.snowline_elev) #ensures neighbor threshold and overlap, plus from an all_loss cell
         pct = self.mov_wind2(basin_loss, 5)
         self.flag_basin_loss = (pct > 0.39) & all_loss
@@ -598,7 +518,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
         topo_clip_masked = self.topo_clip[nan_and_snow_present_mask]
         mat_diff_norm_masked = self.mat_diff_norm[nan_and_snow_present_mask]
         mat_diff_masked = self.mat_diff[nan_and_snow_present_mask]
-        if ~hasattr(self, 'snowline_elev'):
+        if hasattr(self, 'snowline_elev'):
+            pass
+        else:
             self.snowline(snowline_thresh, elevation_band_resolution)
         id_dem = np.digitize(topo_clip_masked, self.elevation_edges) -1  #creates bin edge ids.  the '-1' converts to index starting at zero
         id_dem[id_dem == self.elevation_edges.shape[0]]  = self.elevation_edges.shape[0] - 1 #for some there are as many bins as edges.  this smooshes last bin(the max) into second to last bin edge
@@ -697,8 +619,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.snowline_elev = self.elevation_edges[id_min]  #elevation of estimated snowline
 
         print('The snowline was determined to be at {0}m. It was defined as the first elevation band in the basin \
-                with a mean snow depth >= {1}. Elevation bands were in {2}m increments ',
-                self.snowline_elev, snowline_thresh, elevation_band_resolution)
+                with a mean snow depth >= {1}. Elevation bands were in {2}m increments '.format(
+                self.snowline_elev, snowline_thresh, elevation_band_resolution))
 
     def combine_flags(self, names):
         """

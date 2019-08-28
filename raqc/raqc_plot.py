@@ -1,5 +1,4 @@
-import matplotlib
-matplotlib.use('TkAgg')
+
 import matplotlib.pyplot as plt
 from raqc import plotables as pltz
 import time
