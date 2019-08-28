@@ -65,7 +65,8 @@ class MultiArrayOverlap(object):
         year2 = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
         if file_out_root[-1] != '/':  #ensure user added forward slash
             file_out_root = file_out_root + '/'
-        self.file_path_out = '{0}{1}_to_{2}_{3}.tif'.format(file_out_root, year1, year2, file_name_modifier)
+        self.file_path_out_root = '{0}{1}_to_{2}'.format(file_out_root, year1, year2, file_name_modifier)
+        self.file_path_out = '{0}_{1}.tif'.format(self.file_path_out_root, file_name_modifier)
 
     def clip_extent_overlap(self):
         """
@@ -240,12 +241,13 @@ class MultiArrayOverlap(object):
                 mat_ct += 1
             overlap_nan = overlap_nan & temp_nan  # where conditions of comparison are met and no nans present
             if i == 1:
-                nan_zero = ~temp_nan_prev & (np.absolute(mat).round(2)==0.0)
-                nan_zero = nan_zero & zero_prev & ~temp_nan
-            temp_nan_prev = temp_nan
+                nan_to_zero = ~temp_nan_prev & (np.absolute(mat).round(2)==0.0)
+                zero_to_nan = zero_prev & ~temp_nan
+                zero_and_nan = nan_to_zero | zero_to_nan
+            temp_nan_prev = temp_nan.copy()
             zero_prev = (np.absolute(mat).round(2)==0.0)
         self.overlap_nan = overlap_nan  # where overlap and no nans
-        self.flag_nan_zero = nan_zero
+        self.flag_zero_and_nan = zero_and_nan
         self.overlap_conditional = overlap_conditional & overlap_nan
         self.flag_extreme_outliers = extreme_outliers & overlap_nan
 

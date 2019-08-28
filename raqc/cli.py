@@ -1,6 +1,7 @@
 from raqc import multi_array
 from inicheck.tools import get_user_config
 from inicheck.tools import MasterConfig
+from inicheck.output import generate_config
 # from snowav.utils.MidpointNormalize import MidpointNormalize
 import rasterio as rios
 import sys, os
@@ -25,11 +26,18 @@ def main():
     # this initiates raqc object with file paths
     raqc_obj = multi_array.Flags(cfg['files']['file_path_in_date1'], cfg['files']['file_path_in_date2'],
                 cfg['files']['file_path_topo'], cfg['files']['file_path_out'], cfg['files']['file_name_modifier'])
+
+
     # if files passed are already clipped to each other, then no need to repeat
     if not raqc_obj.already_clipped:
         raqc_obj.clip_extent_overlap()
 
     raqc_obj.make_diff_mat()
+
+    #backup config file
+    config_backup_location = raqc_obj.file_path_out_root + '_raqc_config_backup.ini'
+    generate_config(ucfg, config_backup_location)
+
     name = cfg['difference_arrays']['name']
     action = cfg['difference_arrays']['action']
     operator = cfg['difference_arrays']['operator']
