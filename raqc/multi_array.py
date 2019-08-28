@@ -125,11 +125,11 @@ class MultiArrayOverlap(object):
         file_name_dataset2_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset2).split('/')[-1])[0]
         file_name_dataset2_te_first = os.path.splitext(file_name_dataset2_te_temp)[0][:id_date_start + 8]
         file_name_dataset2_te_second = os.path.splitext(file_name_dataset2_te_temp)[0][id_date_start:]
-        file_name_dataset1_te = self.file_out_root + file_name_dataset1_te_first + '_clipped_to_' + file_name_dataset2_te_second
-        file_name_dataset2_te = self.file_out_root + file_name_dataset2_te_first + '_clipped_to_' + file_name_dataset1_te_second
+        file_name_dataset1_te = self.file_out_root + file_name_dataset1_te_first + '_clipped_to_' + file_name_dataset2_te_second + '.tif'
+        file_name_dataset2_te = self.file_out_root + file_name_dataset2_te_first + '_clipped_to_' + file_name_dataset1_te_second + '.tif'
 
-        file_name_dataset2_te = self.file_out_rout + os.path.splitext(file_name_dataset1_te_temp)[0][:id_date_start + 8] + '_clipped_to_' +  \
-                file_name_dataset2_te_temp + '_common_extent.tif'
+        # file_name_dataset2_te = self.file_out_root + os.path.splitext(file_name_dataset1_te_temp)[0][:id_date_start + 8] + '_clipped_to_' +  \
+        #         file_name_dataset2_te_temp + '_common_extent.tif'
         file_base_topo_te = os.path.splitext(file_name_dataset1_te_temp)[0][:id_date_start + 8] + '_to_' +  \
                             os.path.splitext(file_name_dataset2_te_temp)[0][id_date_start: id_date_start + 8]
         # file_base_topo_te = self.file_path_dataset1.split('/')[-3] + '_' + self.file_path_dataset1.split('/')[-2]
@@ -239,7 +239,13 @@ class MultiArrayOverlap(object):
                     extreme_outliers = extreme_outliers | (~temp)
                 mat_ct += 1
             overlap_nan = overlap_nan & temp_nan  # where conditions of comparison are met and no nans present
+            if i == 1:
+                nan_zero = ~temp_nan_prev & (np.absolute(mat).round(2)==0.0)
+                nan_zero = nan_zero & zero_prev & ~temp_nan
+            temp_nan_prev = temp_nan
+            zero_prev = (np.absolute(mat).round(2)==0.0)
         self.overlap_nan = overlap_nan  # where overlap and no nans
+        self.flag_nan_zero = nan_zero
         self.overlap_conditional = overlap_conditional & overlap_nan
         self.flag_extreme_outliers = extreme_outliers & overlap_nan
 
