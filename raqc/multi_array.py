@@ -243,7 +243,7 @@ class MultiArrayOverlap(object):
             if i == 1:
                 nan_to_zero = ~temp_nan_prev & (np.absolute(mat).round(2)==0.0)
                 zero_to_nan = zero_prev & ~temp_nan
-                zero_and_nan = nan_to_zero | zero_to_nan
+                zero_and_nan = nan_to_zero | zero_to_nan & ~(~temp_nan_prev & ~temp_nan)
             temp_nan_prev = temp_nan.copy()
             zero_prev = (np.absolute(mat).round(2)==0.0)
         self.overlap_nan = overlap_nan  # where overlap and no nans
@@ -626,9 +626,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
         id_min = np.min(np.where(snowline_mean > snowline_thresh))
         self.snowline_elev = self.elevation_edges[id_min]  #elevation of estimated snowline
 
-        print('The snowline was determined to be at {0}m. It was defined as the first elevation band in the basin \
-                with a mean snow depth >= {1}. Elevation bands were in {2}m increments '.format(
-                self.snowline_elev, snowline_thresh, elevation_band_resolution))
+        print(('The snowline was determined to be at {0}m. It was defined as the first elevation band in the basin'
+                'with a mean snow depth >= {1}. Elevation bands were in {2}m increments ').
+                format(self.snowline_elev, snowline_thresh, elevation_band_resolution))
 
     def combine_flags(self, names):
         """
