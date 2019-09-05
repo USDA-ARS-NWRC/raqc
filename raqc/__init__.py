@@ -4,7 +4,7 @@
 
 __author__ = """Zachary R Uhlmann"""
 __email__ = 'zach.uhlmann@usda.gov'
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 
 import os
 
