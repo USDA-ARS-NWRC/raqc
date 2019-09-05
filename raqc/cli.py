@@ -1,7 +1,7 @@
 from raqc import multi_array
-from inicheck.tools import get_user_config
-from inicheck.tools import MasterConfig
-from inicheck.output import generate_config
+from inicheck.tools import get_user_config, check_config
+from inicheck.config import MasterConfig
+from inicheck.output import generate_config, print_config_report
 # from snowav.utils.MidpointNormalize import MidpointNormalize
 import rasterio as rios
 import sys, os
@@ -18,25 +18,31 @@ def main():
         configFile = args.user_config
 
     mcfgFile = MasterConfig(modules = 'raqc')
-    ucfg = get_user_config(configFile, mcfg = mcfgFile)
+    ucfg = get_user_config(configFile, mcfg = mcfgFile, checking_later = False)
+
+    #ensure no errors
+    warnings, errors = check_config(ucfg)
+    if errors != [] or warnings != []:
+        print_config_report(warnings,errors)
 
     #checking_later allows not to crash with errors.
     cfg = ucfg.cfg
 
     # this initiates raqc object with file paths
-    raqc_obj = multi_array.Flags(cfg['files']['file_path_in_date1'], cfg['files']['file_path_in_date2'],
-                cfg['files']['file_path_topo'], cfg['files']['file_path_out'], cfg['files']['file_name_modifier'])
+    raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'], cfg['paths']['file_path_in_date2'],
+                cfg['paths']['file_path_topo'], cfg['paths']['file_path_out'], cfg['paths']['basin'], cfg['paths']['file_name_modifier'],
+                cfg['block_behavior']['elevation_band_resolution'])
 
 
     # if files passed are already clipped to each other, then no need to repeat
     if not raqc_obj.already_clipped:
-        raqc_obj.clip_extent_overlap()
+        remove_files = cfg['options']['remove_clipped_files']
+        raqc_obj.clip_extent_overlap(remove_files)
 
     raqc_obj.make_diff_mat()
 
-    #backup config file
-    config_backup_location = raqc_obj.file_path_out_root + '_raqc_config_backup.ini'
-    generate_config(ucfg, config_backup_location)
+
+    # Add check_config
 
     name = cfg['difference_arrays']['name']
     action = cfg['difference_arrays']['action']
@@ -62,20 +68,23 @@ def main():
         if flag in flags:
             block_window_size = cfg['block_behavior']['moving_window_size']
             block_window_threshold = cfg['block_behavior']['neighbor_threshold']
-            snowline_thresh = cfg['block_behavior']['snowline_thresh']
-            elevation_band_resolution = cfg['block_behavior']['elevation_band_resolution']
+            snowline_threshold = cfg['block_behavior']['snowline_threshold']
             outlier_percentiles = cfg['block_behavior']['outlier_percentiles']
             if flag == 'basin_block':
-                raqc_obj.flag_blocks(block_window_size, block_window_threshold, snowline_thresh, elevation_band_resolution)
+                raqc_obj.basin_blocks(block_window_size, block_window_threshold, snowline_threshold)
             elif flag == 'elevation_block':
-                raqc_obj.hypsometry(block_window_size, block_window_threshold, snowline_thresh, elevation_band_resolution, outlier_percentiles)
+                raqc_obj.hypsometry(block_window_size, block_window_threshold, snowline_threshold, outlier_percentiles)
 
     raqc_obj.combine_flags(flags)  # makes a combined flags map (which is not output), but also collects list of flag names for later
-    file_out = cfg['files']['file_path_out']
-    want_plot = cfg['plot']['interactive_plot']
+    file_out = cfg['paths']['file_path_out']
+    want_plot = cfg['options']['interactive_plot']
     if want_plot == True:
         raqc_obj.plot_this()
     raqc_obj.save_tiff(file_out)
+
+    #backup config file
+    config_backup_location = raqc_obj.file_path_out_backup_config
+    generate_config(ucfg, config_backup_location)
 
 
 if __name__=='__main__':
