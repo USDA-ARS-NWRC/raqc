@@ -372,16 +372,19 @@ class MultiArrayOverlap(object):
         tick = time.clock()
         flag_names = self.flag_names.copy()
         flag_names.append('mat_diff_norm_nans')  # 1)Change here and @2 if desire to save single band
+        data_type = str(self.mat_diff_norm.dtype)
         self.meta.update({
-            'count': len(flag_names)})
-
+            'count': len(flag_names)
+            })
         with rio.open(self.file_path_out_tif, 'w', **self.meta) as dst:
             for id, band in enumerate(flag_names, start = 1):
                 try:
                     dst.write_band(id, getattr(self, flag_names[id - 1]))
-                except ValueError:
+                    dst.set_band_description(id, flag_names[id - 1])
+                except ValueError:  # casts all arrays as float32.  Rasterio does not have float16, hence float32
                     mat_temp = getattr(self, flag_names[id - 1])
                     dst.write_band(id, mat_temp.astype('float32'))
+                    dst.set_band_description(id, flag_names[id - 1])
         tock = time.clock()
         print('save tiff = ', tock - tick, 'seconds')
 
@@ -518,10 +521,7 @@ class PatternFilters():
         mat = mat > 0
         base_offset = math.floor(size/2)
         patches = image.extract_patches_2d(mat, (size,size))
-        print(type(patches[0][0][0]))
-        print(mat.shape)
         pct_temp = np.ndarray.astype(patches.sum(axis = (-1, -2))/(size**2), np.float16)
-        print(type(pct_temp[0]))
         del patches
         pct_temp = np.reshape(pct_temp, (mat.shape[0] - 2 * base_offset, mat.shape[1] - 2 * base_offset))
         pct = np.zeros(mat.shape, dtype = np.float16)
