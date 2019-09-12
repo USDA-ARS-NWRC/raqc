@@ -28,7 +28,39 @@ def main():
     #checking_later allows not to crash with errors.
     cfg = ucfg.cfg
 
-    # this initiates raqc object with file paths
+    # ENSURE elevation and basin were in flags[flags] if trees was
+    # Gather all flags specified in config
+    flags = cfg['flags']['flags']
+    tree_loss = cfg['flags']['tree_loss']
+    tree_gain = cfg['flags']['tree_gain']
+
+    # determine which flags were requested
+    basin_present = 'basin_block' in flags
+    elevation_present = 'elevation_block' in flags
+    both_present = False
+    while True:
+        if basin_present & elevation_present:
+            both_present = True
+            break
+        else:
+            if any([wrd in (tree_loss + tree_gain) for wrd in ['or', 'and']]): #both requested in flags
+                both_required = True
+                missing = 'add to flags ' + basin_present * 'elevation_block' + elevation_present * 'basin_block'
+                break
+            else:
+                dict_logic = {'basin' : 1, 'elevation' : -1}
+                dict_determine_required = {2 : 'basin_required', -2 : 'elevation_required'}
+                keys = dict_logic[tree_loss] + dict_logic[tree_gain]
+                if keys == 0:  # both requested in flags
+                    missing = 'add to flags ' + basin_present * 'elevation_block' + elevation_present * 'basin_block'
+                    break
+                else:
+                    requirement_present = dict_determine_required[keys]
+                    missing = '{} is required'.format(requirement_present)
+                    break
+    print(missing)
+
+    # initiate raqc object with file paths
     raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'], cfg['paths']['file_path_in_date2'],
                 cfg['paths']['file_path_topo'], cfg['paths']['file_path_out'], cfg['paths']['basin'], cfg['paths']['file_name_modifier'],
                 cfg['block_behavior']['elevation_band_resolution'])
@@ -47,18 +79,14 @@ def main():
     val = cfg['difference_arrays']['val']
     raqc_obj.mask_advanced(name, action, operator, val)
 
-    # Gather all flags specified in config
-    flags = cfg['flags']['flags']
     # if user specified histogram outliers in user config
-    if 'hist' in flags:
+    if 'histogram' in flags:
         histogram_mats = cfg['histogram_outliers']['histogram_mats']
         num_bins = cfg['histogram_outliers']['num_bins']
-        # raqc_obj.hist2d_with_bins_mapped(histogram_mats, num_bins)
         threshold_histogram_space = cfg['histogram_outliers']['threshold_histogram_space']
         moving_window_name = cfg['histogram_outliers']['moving_window_name']
         moving_window_size = cfg['histogram_outliers']['moving_window_size']
         raqc_obj.make_hist(histogram_mats, num_bins, threshold_histogram_space, moving_window_size)
-        # raqc_obj.outliers_hist(threshold_histogram_space, moving_window_name, moving_window_size)  # INICHECK
 
     # if user wants to check for blocks
     for flag in ['basin_block', 'elevation_block']:
@@ -80,15 +108,15 @@ def main():
         logic = [cfg['flags']['tree_loss'], cfg['flags']['tree_gain']]
         raqc_obj.tree(logic)
 
-    raqc_obj.combine_flag_names(flags)  # makes a combined flags map (which is not output), but also collects list of flag names for later
-    file_out = cfg['paths']['file_path_out']
-    include_masks = cfg['options']['include_masks']
     want_plot = cfg['options']['interactive_plot']
-
     if want_plot == True:
         raqc_obj.plot_this()
 
-    raqc_obj.save_tiff(file_out, include_masks)
+    file_out = cfg['paths']['file_path_out']
+    include_arrays = cfg['options']['include_arrays']
+    include_masks = cfg['options']['include_masks']
+
+    raqc_obj.save_tiff(file_out, flags, include_arrays, include_masks)
 
     #backup config file
     config_backup_location = raqc_obj.file_path_out_backup_config
