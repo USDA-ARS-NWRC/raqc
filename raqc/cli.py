@@ -55,8 +55,16 @@ def main():
                     missing = 'add to flags ' + basin_present * 'elevation_block' + elevation_present * 'basin_block'
                     break
                 else:
-                    requirement_present = dict_determine_required[keys]
-                    missing = '{} is required'.format(requirement_present)
+                    # requirement_present = dict_determine_required[keys]
+                    basin_present = basin_present * 2
+                    elevation_present = elevation_present * -2
+                    if keys == basin_present:
+                        pass
+                    elif keys == elevation_present:
+                        pass
+                    else:
+                        required = dict_determine_required[keys]
+                        missing = '{} is required'.format(required)
                     break
     print(missing)
 
@@ -64,7 +72,6 @@ def main():
     raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'], cfg['paths']['file_path_in_date2'],
                 cfg['paths']['file_path_topo'], cfg['paths']['file_path_out'], cfg['paths']['basin'], cfg['paths']['file_name_modifier'],
                 cfg['block_behavior']['elevation_band_resolution'])
-
     # if files passed are already clipped to each other, then no need to repeat
     if not raqc_obj.already_clipped:
         remove_files = cfg['options']['remove_clipped_files']
@@ -76,8 +83,9 @@ def main():
     name = cfg['difference_arrays']['name']
     action = cfg['difference_arrays']['action']
     operator = cfg['difference_arrays']['operator']
-    val = cfg['difference_arrays']['val']
-    raqc_obj.mask_advanced(name, action, operator, val)
+    value = cfg['difference_arrays']['value']
+    raqc_obj.mask_basic()
+    raqc_obj.mask_advanced(name, action, operator, value)
 
     # if user specified histogram outliers in user config
     if 'histogram' in flags:
@@ -86,7 +94,7 @@ def main():
         threshold_histogram_space = cfg['histogram_outliers']['threshold_histogram_space']
         moving_window_name = cfg['histogram_outliers']['moving_window_name']
         moving_window_size = cfg['histogram_outliers']['moving_window_size']
-        raqc_obj.make_hist(histogram_mats, num_bins, threshold_histogram_space, moving_window_size)
+        raqc_obj.make_histogram(histogram_mats, num_bins, threshold_histogram_space, moving_window_size)
 
     # if user wants to check for blocks
     for flag in ['basin_block', 'elevation_block']:
@@ -97,16 +105,16 @@ def main():
             outlier_percentiles = cfg['block_behavior']['outlier_percentiles']
             if flag == 'basin_block':
                 apply_moving_window = cfg['flags']['apply_moving_window_basin']
-                raqc_obj.basin_blocks(apply_moving_window, block_window_size, block_window_threshold, snowline_threshold)
+                raqc_obj.flag_basin_blocks(apply_moving_window, block_window_size, block_window_threshold, snowline_threshold)
             elif flag == 'elevation_block':
                 apply_moving_window = cfg['flags']['apply_moving_window_elevation']
                 elevation_thresholding = [cfg['flags']['elevation_loss'], cfg['flags']['elevation_gain']]
-                raqc_obj.hypsometry(apply_moving_window, block_window_size, block_window_threshold, snowline_threshold,
+                raqc_obj.flag_elevation_blocks(apply_moving_window, block_window_size, block_window_threshold, snowline_threshold,
                                         outlier_percentiles, elevation_thresholding)
 
     if 'tree' in cfg['flags']['flags']:
         logic = [cfg['flags']['tree_loss'], cfg['flags']['tree_gain']]
-        raqc_obj.tree(logic)
+        raqc_obj.flag_tree_blocks(logic)
 
     want_plot = cfg['options']['interactive_plot']
     if want_plot == True:

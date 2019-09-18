@@ -6,11 +6,11 @@ import numpy as np
 import scipy
 
 def plot_basic(self):
-    print('this is where matplotlib lives: ', matplotlib.matplotlib_fname())
+    # print('this is where matplotlib lives: ', matplotlib.matplotlib_fname())s
     pltz_obj = pltz.Plotables()
     pltz_obj.set_zero_colors(1)
     pltz_obj.marks_colors()
-    print('in plot basic', matplotlib.get_backend())
+    # print('in plot basic', matplotlib.get_backend())
 
     plt.close(0)
     fig, axes = plt.subplots(num = 0, nrows = 1, ncols = 2, figsize = (10,4))
