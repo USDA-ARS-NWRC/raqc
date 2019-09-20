@@ -10,6 +10,9 @@ import os
 
 __core_config__ = os.path.abspath(os.path.dirname(__file__) + '/CoreConfig.ini')
 
+
+__recipes__ = os.path.abspath(os.path.dirname(__file__) + '/recipes.ini')
+
 __config_titles__ = {'files': 'filepaths of input images and output locations',
                      'difference_arrays': 'specify actions to perform on arrays',
                      'flags': 'specify flags (outliers) desired in otput',

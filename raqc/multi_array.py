@@ -303,49 +303,8 @@ class MultiArrayOverlap(object):
             mask_overlap_conditional = mask_overlap_conditional & temp
         self.mask_overlap_conditional = mask_overlap_conditional & self.mask_overlap_nan
 
-        # shp = getattr(self, self.keys_master['config_to_mat_object'][name[0]]).shape
-        # mask_overlap_nan = np.ones(shp, dtype = bool)
-        # mask_overlap_conditional = np.zeros(shp, dtype = bool)
-        # extreme_outliers = np.zeros(shp, dtype = bool)
-        # mat_ct = 0  # initialize count of mats for conditional masking
-        # for i in range(len(name)):
-        #     mat = getattr(self, self.keys_master['config_to_mat_object'][name[i]])
-        #     # replace nan with -9999 and identify location for output
-        #     # if action[i] == 'na':
-        #     #     action_temp = False
-        #     # else:
-        #     #     action_temp = True
-        #     if (mat == -9999).any():  # if nans are present and represented by -9999
-        #         mat_mask = mat.copy()
-        #         temp_nan = mat_mask != -9999  # set nans to -9999
-        #         print('In -9999')
-        #     else:   # no nans present
-        #         mat_mask = mat.copy()
-        #         temp_nan = np.ones(shp, dtype = bool)
-        #
-        #     if action_temp == True:
-        #         for j in range(2):
-        #             id = mat_ct * 2 + j
-        #             op_str = self.keys_master['operators'][operation[id]]
-        #             cmd = 'mat_mask' + op_str + str(value[id])
-        #             temp = eval(cmd)
-        #             mask_overlap_conditional = mask_overlap_conditional | temp
-        #             extreme_outliers = extreme_outliers | (~temp)
-        #         mat_ct += 1
-        #     if i == 1:
-        #         # nan_to_zero = ~temp_nan_prev & (np.absolute(mat).round(2)==0.0)   # m2_nans and m1_zeros
-        #         nan_to_zero = ~temp_nan_prev & (np.absolute(mat) == 0)   # m2_nans and m1_zeros
-        #         zero_to_nan = zero_prev & ~temp_nan                               # m2_zeros and m1_nans
-        #         zero_and_nan = nan_to_zero | zero_to_nan
-        #     mask_overlap_nan = mask_overlap_nan & temp_nan  # where conditions of comparison are met and no nans present
-        #     temp_nan_prev = temp_nan.copy()
-        #     # zero_prev = (np.absolute(mat).round(2)==0.0)
-        #     zero_prev = np.absolute(mat) == 0
-        # self.mask_overlap_nan = mask_overlap_nan  # where overlap and no nans
-        # self.flag_zero_and_nan = zero_and_nan
-        # self.mask_overlap_conditional = mask_overlap_conditional & mask_overlap_nan
-        # self.flag_extreme_outliers = extreme_outliers & mask_overlap_nan
         print('Exited mask_advanced')
+
     # @profile
     def make_diff_mat(self):
         """
@@ -473,7 +432,7 @@ class MultiArrayOverlap(object):
             for file in self.new_file_list:
                 run('rm ' + file, shell = True)
 
-        print('save tiff = ', tock - tick, 'seconds')
+        print('save tiff = ', round(tock - tick, 2), 'seconds')
 
     def plot_this(self):
         plot_basic(self)
@@ -646,8 +605,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
         m1 = getattr(self, self.keys_master['config_to_mat_object'][name[0]])
         m2 = getattr(self, self.keys_master['config_to_mat_object'][name[1]])
         m1_nan, m2_nan = m1[self.mask_overlap_conditional], m2[self.mask_overlap_conditional]
-        print('m2: ', self.keys_master['config_to_mat_object'][name[1]])
-        print(np.sum(np.isnan(m2_nan)))
         bins, xedges, yedges = np.histogram2d(np.ravel(m1_nan), np.ravel(m2_nan), nbins)
         self.xedges, self.yedges= xedges, yedges
 
@@ -658,7 +615,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.bins = bins
         pct = self.mov_wind(bins, moving_window_size)
         flag_spatial_outlier = (pct < thresh[0]) & (bins > 0)
-        print('num of hist outliers ', np.sum(flag_spatial_outlier))
         # flag_bin_ct = (bins < thresh[1]) & (bins > 0)  # ability to filter out bin counts lower than thresh but above zero
         outliers_hist_space = flag_spatial_outlier
         self.outliers_hist_space = outliers_hist_space
@@ -671,7 +627,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
         for x, y in zip(id[1], id[0]):
                 temp = (idx_bins == x) & (idy_bins == y)
                 hist_outliers_temp = (idx_bins == x) & (idy_bins == y) | hist_outliers_temp
-                # print('hist outliers temp ', np.sum(hist_outliers_temp))
         hist_outliers = np.zeros(m1.shape, dtype = bool)
         hist_outliers[self.mask_overlap_conditional] = hist_outliers_temp
         self.flag_histogram = hist_outliers
@@ -706,11 +661,13 @@ class Flags(MultiArrayOverlap, PatternFilters):
         basin_gain = self.mask_overlap_nan & self.all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
 
         if apply_moving_window:
+            print('did apply moving window')
             pct = self.mov_wind2(basin_loss, moving_window_size)
             self.flag_basin_loss = (pct > neighbor_threshold) & self.all_loss
             pct = self.mov_wind2(basin_gain, moving_window_size)
             self.flag_basin_gain = (pct > neighbor_threshold) & self.all_gain
         else:
+            print('no moving window')
             self.flag_basin_loss = basin_loss
             self.flag_basin_gain = basin_gain
 
@@ -830,8 +787,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 ct += 1
             column_names_temp.append(names)
 
-        temp = np.stack((self.elevation_edges[id_dem_unique], np.around(thresh_upper_raw.ravel(), 3), np.around(thresh_upper_norm.ravel(), 3),
-                np.around(thresh_lower_raw.ravel(), 3), np.around(thresh_lower_norm.ravel(), 3), elevation_count.ravel()), axis = -1)
+        temp = np.stack((self.elevation_edges[id_dem_unique], thresh_upper_raw.ravel(), thresh_upper_norm.ravel(),
+                thresh_lower_raw.ravel(), thresh_lower_norm.ravel(), elevation_count.ravel()), axis = -1)
+        temp = np.around(temp, 2)
         df = pd.DataFrame(temp, columns = column_names_temp)
         df.to_csv(path_or_buf = self.file_path_out_csv, index=False)
 
@@ -881,8 +839,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
             self.veg_height_clip = veg_height_clip[0]
         self.veg_presence = self.veg_height_clip > 5
 
-        print(('The snowline was determined to be at {0}m. It was defined as the first elevation band in the basin'
-                'with a mean snow depth >= {1}. Elevation bands were in {2}m increments ').
+        print(('The snowline was determined to be at {0}m. \nIt was defined as the first elevation band in the basin'
+                'with a mean snow depth >= {1}. \nElevation bands were in {2}m increments ').
                 format(self.snowline_elev, snowline_threshold, self.elevation_band_resolution))
 
     def flag_tree_blocks(self, logic):

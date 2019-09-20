@@ -31,47 +31,73 @@ def main():
     # ENSURE elevation and basin were in flags[flags] if trees was
     # Gather all flags specified in config
     flags = cfg['flags']['flags']
-    tree_loss = cfg['flags']['tree_loss']
-    tree_gain = cfg['flags']['tree_gain']
 
-    # determine which flags were requested
-    basin_present = 'basin_block' in flags
-    elevation_present = 'elevation_block' in flags
-    both_present = False
-    while True:
-        if basin_present & elevation_present:
-            both_present = True
-            break
-        else:
-            if any([wrd in (tree_loss + tree_gain) for wrd in ['or', 'and']]): #both requested in flags
-                both_required = True
-                missing = 'add to flags ' + basin_present * 'elevation_block' + elevation_present * 'basin_block'
+    # TONS of logic to populate some flags if necessary
+    # Tree flag requires basin_block and/or elevation_block.  Check that values are present in UserConfig
+    if 'tree' not in flags:
+        tree = False
+    else:
+        tree = True
+        tree_loss = cfg['flags']['tree_loss']
+        tree_gain = cfg['flags']['tree_gain']
+
+        # determine which flags were requested
+        basin_in_flag = 'basin_block' in flags
+        elevation_in_flag = 'elevation_block' in flags
+        both_present = False
+        missing = []
+        while True:
+            if basin_in_flag & elevation_in_flag:
+                both_present = True
                 break
             else:
-                dict_logic = {'basin' : 1, 'elevation' : -1}
-                dict_determine_required = {2 : 'basin_required', -2 : 'elevation_required'}
-                keys = dict_logic[tree_loss] + dict_logic[tree_gain]
-                if keys == 0:  # both requested in flags
-                    missing = 'add to flags ' + basin_present * 'elevation_block' + elevation_present * 'basin_block'
-                    break
-                else:
-                    # requirement_present = dict_determine_required[keys]
-                    basin_present = basin_present * 2
-                    elevation_present = elevation_present * -2
-                    if keys == basin_present:
-                        pass
-                    elif keys == elevation_present:
-                        pass
+                if any([wrd in (tree_loss + tree_gain) for wrd in ['or', 'and']]): # 'and' 'or' requested but only basin or elevation flag requested
+                    if basin_in_flag + elevation_in_flag == 0:
+                        missing.extend(('elevation_block', 'basin_block'))
                     else:
-                        required = dict_determine_required[keys]
-                        missing = '{} is required'.format(required)
-                    break
-    print(missing)
+                        [missing.append(item) for item in [basin_in_flag * 'elevation_block', elevation_in_flag * 'basin_block'] if item != '']
+                else:   # if no 'and' 'or' but only basin, elevation or neither flag requested
+                    dict_logic = {'basin' : 1, 'elevation' : -1}
+                    dict_determine_required = {2 : 'basin_block', -2 : 'elevation_block'}
+                    keys = dict_logic[tree_loss] + dict_logic[tree_gain]
+                    if keys == 0:  # both elevation and basin requested for trees, but not in flags
+                        # missing.extend((basin_in_flag * 'elevation_block', elevation_in_flag * 'basin_block'))
+                        [missing.append(item) for item in [basin_in_flag * 'elevation_block', elevation_in_flag * 'basin_block'] if item != '']
+                        break
+                    else:
+                        if keys == basin_in_flag * 2:
+                            pass
+                        elif keys == elevation_in_flag * -2:
+                            pass
+                        else:
+                            required = dict_determine_required[keys]
+                            missing.append(required)
+            if not both_present:
+                if len(missing) == 2:
+                    missing_temp = missing.copy()
+                    missing_temp.insert(1, 'and')
+                missing_concat = ' '.join(missing_temp)
+                print(("The tree flag was requested in the UserConfig."
+                        "\nThis REQUIRES both elevation_block and basin_block flags."
+                        "\nYou are MISSING: {0} flags"
+                        "\nWould you like to add those flags?"
+                        "\nIf 'no', system will exit"
+                        "\nNote: if 'yes', these values will NOT be saved to the backup_config").format(missing_concat))
+                response = input()
+                if response.lower() == 'yes':
+                    flags.extend(missing)
+                    pass
+                elif response.lower() == 'no':
+                    sys.exit("exiting program")
+                else:
+                    print('please answer "yes" or "no"')
+                break
 
     # initiate raqc object with file paths
     raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'], cfg['paths']['file_path_in_date2'],
                 cfg['paths']['file_path_topo'], cfg['paths']['file_path_out'], cfg['paths']['basin'], cfg['paths']['file_name_modifier'],
                 cfg['block_behavior']['elevation_band_resolution'])
+
     # if files passed are already clipped to each other, then no need to repeat
     if not raqc_obj.already_clipped:
         remove_files = cfg['options']['remove_clipped_files']
@@ -112,8 +138,9 @@ def main():
                 raqc_obj.flag_elevation_blocks(apply_moving_window, block_window_size, block_window_threshold, snowline_threshold,
                                         outlier_percentiles, elevation_thresholding)
 
-    if 'tree' in cfg['flags']['flags']:
-        logic = [cfg['flags']['tree_loss'], cfg['flags']['tree_gain']]
+
+    if tree:
+        logic = [tree_loss, tree_gain]
         raqc_obj.flag_tree_blocks(logic)
 
     want_plot = cfg['options']['interactive_plot']

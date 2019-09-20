@@ -16,10 +16,13 @@ def plot_basic(self):
     fig, axes = plt.subplots(num = 0, nrows = 1, ncols = 2, figsize = (10,4))
     asp_ratio = np.min(self.bins.shape) / np.max(self.bins.shape)
     xedges, yedges = self.xedges, self.yedges
+    minx, maxx = min(xedges), max(xedges)
+    miny, maxy = min(yedges), max(yedges)
+
 
     # Sub1: overall 2D hist
     h = axes[0].imshow(self.bins, origin = 'lower', vmin=0.1, vmax = 1000, cmap = pltz_obj.cmap_choose,
-         extent = (min(xedges), max(xedges), min(yedges), max(yedges)))
+         extent = (minx, maxx, miny, maxy), aspect = ((maxx - minx) / (maxy - miny)))
     cbar = plt.colorbar(h, ax = axes[0])
     cbar.set_label('bin count')
     axes[0].title.set_text('2D histogram')
@@ -28,12 +31,11 @@ def plot_basic(self):
 
     # Sub2: clipped outliers
     h = axes[1].imshow(self.outliers_hist_space, origin = 'lower',
-        extent = (min(xedges), max(xedges), min(yedges), max(yedges)))
+        extent = (minx, maxx, miny, maxy), aspect = ((maxx - minx) / (maxy - miny)))
     # axes[1].title.set_text('outlier bins w/mov wind thresh: ' + str(round(threshold_histogram_space[0],2)))
     axes[1].set_xlabel('early date depth (m)')
     axes[1].set_ylabel('relative delta snow depth')
     plt.show()
-    print('tried to show')
     # plt.savefig('/home/zachuhlmann/projects/data/test.png', dpi=180)
 
     # print('type initial ', type(self.bins))

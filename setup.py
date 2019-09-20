@@ -41,7 +41,7 @@ setup(
     license="GNU General Public License v3",
     long_description=readme + '\n\n' + history,
     include_package_data=True,
-    package_data={'raqc':['CoreConfig.ini']},
+    package_data={'raqc':['CoreConfig.ini', 'recipes.ini']},
     keywords='raqc',
     name='raqc',
 #    packages=find_packages(include=['raqc']),
