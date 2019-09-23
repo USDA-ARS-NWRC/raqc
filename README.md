@@ -42,11 +42,28 @@ Here is a sample user configuration file (UserConfig) <i>Note: some options MAY 
 <i>this section enables user to select which flags to include in analysis, wheter to apply moving windows when applicable and how to define the construction of each flag.</i>
 - ```[flags]``` choose flags.  if ```basin_block``` or ```elevation block``` is selected, flags of 'loss' and 'gain will be created for basin or elevation respectively.  
     **For example:** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
--  ex)
+-  ex) Below config options will create mask with date1 depth < 1700 cm, normalized change < 20 or 2,000% and nans.  
+
 ```[difference_arrays]
 name:                      date1, difference_normalized
 action:                     compare, compare
 operator:                    less_than, greater_than, less_than, greater_than
 value:                          1700, -1, 20, -1.1
 ```
-Below config options will date1 depth < 1700 cm, normalized change < 20 or 2,000% and nans.  Saved to --->  ``self.overlap_conditional```
+
+### [histogram_outliers]
+<i>sets parameters for 2D histogram space outliers</i>
+- ex) x-axis: date1 60 bins with a snow depth range from 0-1700m would have bin widths of ~ 28cm.  
+        y-axis: difference_normalized with range of -1 to 20 would have bin width of ~.10 or 10% change increments
+```
+[histogram_outliers]
+histogram_mats:                date1, difference_normalized
+num_bins:                      60,  200
+threshold_histogram_space:     0.45, 1
+moving_window_name:            bins
+moving_window_size:             3
+```
+
+
+
+
