@@ -76,13 +76,27 @@ moving_window_size:             3
 
 **ex) Thresholding sample USCASJ20170402_to_20170605 difference DataFrame **
 
-| **Elevation (m)** | **95% change (m)** | **95% change ((date1 - date2) / date1)** | **5% change (m)** | **5% change ((date1 - date2) / date1)** |  **bin count** |
+| **Elevation (m)** | **Thresh: 95% change (cm)** | **Thresh 95% change (norm)** | **Thresh: 5% change (cm)** | **5% change (norm)** |  **bin count** |
 | --- | --- | --- | --- | --- | --- |
 | 2800 | 103 | 1.99 | -304 | -1 | 23500 |
 | 2850 | 98 | 1.62 | -289 | -1 | 32400 |
 | 2900 | 115 | 2.80 | -274 | -1 | 10500 |
 | 2950 | 112 | 3.32 | -246 | -1 | 29600 |
 <i>95% and 5% refer to upper and lower thresholds respectively</i>
+
+```[flags]
+flags:                          histogram, basin_block, elevation_block, tree
+apply_moving_window_basin:      True
+elevation_loss:                 difference
+elevation_gain:                 difference, difference_normalized
+apply_moving_window_elevation:  True
+tree_loss:                      and
+tree_gain:                      or
+```
+Using above table and UserConfig:
+&nbsp;&nbsp;  Within the 2800m elevation bin, pixels with (```difference``` > 103cm) & (```difference_normalized``` > 1.99), the ```elevation_gain``` flag will be True, indicating an **Outlier**
+
+&nbsp;&nbsp;  Within the 2800m elevation bin, pixels with (```difference``` < -304cm) ```elevation_loss``` flag will be True, indicating an **Outlier**
 
 ### [options]
 <i>options for extra options in RAQC</i>
