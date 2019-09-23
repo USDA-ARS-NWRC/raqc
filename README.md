@@ -31,13 +31,13 @@ To Run:
 - RAQC utilizes a configuration file managed by inicheck (https://github.com/USDA-ARS-NWRC/inicheck).  User must set all parameters here and run throught the command line.
 
 Here is a sample user configuration file (UserConfig) <i>Note: some options MAY have changed</i>  
-- [difference_arrays]  
+## [difference_arrays]  
 **required** to visualize the 2D histogram **if** [options][interactive_plot] = y  
 Limited functionality currently.  Clips attributes from [name] based on operator [action], [operator] and [value].  Default is snow depth less than 1700cm and normalized difference < 20 or 2,000%.
 
-- [flags]
+## [flags]
 *this section enables user to select which flags to include in analysis, wheter to apply moving windows when applicable and how to define the construction of each flag.*
--[flags] choose flags.  if basin_block or elevation block is selected, flags of 'loss' and 'gain will be created.  For example, [flags][basin_blocks] will yield ```flag_basin_loss``` and ```flag_basin_gain```.
+## [flags] choose flags.  if basin_block or elevation block is selected, flags of 'loss' and 'gain will be created.  For example, [flags][basin_blocks] will yield ```flag_basin_loss``` and ```flag_basin_gain```.
 
 '''
 ################################################################################
