@@ -42,69 +42,11 @@ Here is a sample user configuration file (UserConfig) <i>Note: some options MAY 
 <i>this section enables user to select which flags to include in analysis, wheter to apply moving windows when applicable and how to define the construction of each flag.</i>
 - ```[flags]``` choose flags.  if ```basin_block``` or ```elevation block``` is selected, flags of 'loss' and 'gain will be created for basin or elevation respectively.  
     **For example:** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
-````[difference_arrays]
-name:                      date1, difference_normalized
-action:                     compare, compare
-operator:                    less_than, greater_than, less_than, greater_than
-value:                          1700, -1, 20, -1.1```
-
-this will yield ```self.overlap_conditional``` which masks nans and date1 depth < 1700 cm and normalized change < 20 or 2,000%
-'''
-################################################################################
-# Match, Clip and Filter Dates
-################################################################################
-[difference_arrays]
+- **ex)
+```[difference_arrays]
 name:                      date1, difference_normalized
 action:                     compare, compare
 operator:                    less_than, greater_than, less_than, greater_than
 value:                          1700, -1, 20, -1.1
-
-################################################################################
-# which outlier tests
-################################################################################
-[flags]
-flags:                          histogram, basin_block, elevation_block, tree
-apply_moving_window_basin:      True
-elevation_loss:                 difference
-elevation_gain:                 difference, difference_normalized
-apply_moving_window_elevation:  True
-tree_loss:                      and
-tree_gain:                      or
-
-################################################################################
-# Histogram space parameters
-################################################################################
-[histogram_outliers]
-histogram_mats:                date1, difference_normalized
-num_bins:                      60,  200
-threshold_histogram_space:     0.45, 1
-moving_window_name:            bins
-moving_window_size:             3
-
-################################################################################
-[block_behavior]
-moving_window_size:               5
-neighbor_threshold:               0.39
-snowline_threshold:               40
-elevation_band_resolution:        50
-outlier_percentiles:              95, 95, 5, 5
-
-################################################################################
-[options]
-include_arrays:                     difference, difference_normalized, date1, date2
-include_masks:                      None
-interactive_plot:                    n
-remove_clipped_files:               False
-
-#[section]
-#item:    #value
-
-
-
-Credits
--------
-
-This package was created with Cookiecutter_ and the `audreyr/cookiecutter-pypackage`_ project template.
-
-.. _Cookiecutter: https://github.com/audreyr/cookiecutter
-.. _`audreyr/cookiecutter-pypackage`: https://github.com/audreyr/cookiecutter-pypackage
+```
+this will yield ```self.overlap_conditional``` which masks nans and date1 depth < 1700 cm and normalized change < 20 or 2,000%
