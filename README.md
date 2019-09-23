@@ -54,7 +54,7 @@ value:                          1700, -1, 20, -1.1
 ### [histogram_outliers]
 <i>sets parameters for 2D histogram space outliers</i>
 - ex) x-axis: '''date1''' 60 bins with a snow depth range of 0 to 1700cm and bin widths of ~ 28cm.  
-      y-axis: '''difference_normalized''' 200 bins with range of -1 to 20 and bin width of ~.10 or 10% change increments
+&nbsp;&nbsp;&nbsp;&nbsp; y-axis: '''difference_normalized''' 200 bins with range of -1 to 20 and bin width of ~.10 or 10% change increments
       ```threshold_space:  0.45, 1```: target cells with < ```0.45``` or 45% of cells within moving window of >= ```1``` bin count **will be flagged**
 ```
 [histogram_outliers]
