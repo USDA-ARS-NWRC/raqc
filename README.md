@@ -35,12 +35,20 @@ Here is a sample user configuration file (UserConfig) <i>Note: some options MAY 
 <i>required to visualize the 2D histogram when ```[options][interactive_plot] = y```</i>  
 - Clips array from ```[name]``` based on items ```[action]```, ```[operator]``` and ```[value]```.  
 - Default is snow depth less than 1700cm and normalized difference < 20 or 2,000%.
+- <b>ex)</b>  
+    
 
 ### [flags]
 <i>this section enables user to select which flags to include in analysis, wheter to apply moving windows when applicable and how to define the construction of each flag.</i>
-- ```[flags]``` choose flags.  if basin_block or elevation block is selected, flags of 'loss' and 'gain will be created.  
+- ```[flags]``` choose flags.  if ```basin_block``` or ```elevation block``` is selected, flags of 'loss' and 'gain will be created for basin or elevation respectively.  
     **For example:** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
+[difference_arrays]
+name:                      date1, difference_normalized
+action:                     compare, compare
+operator:                    less_than, greater_than, less_than, greater_than
+value:                          1700, -1, 20, -1.1
 
+this will yield ```self.overlap_conditional``` which masks nans and date1 depth < 1700 cm and normalized change < 20 or 2,000%
 '''
 ################################################################################
 # Match, Clip and Filter Dates
