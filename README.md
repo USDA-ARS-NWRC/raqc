@@ -42,11 +42,11 @@ Here is a sample user configuration file (UserConfig) <i>Note: some options MAY 
 <i>this section enables user to select which flags to include in analysis, wheter to apply moving windows when applicable and how to define the construction of each flag.</i>
 - ```[flags]``` choose flags.  if ```basin_block``` or ```elevation block``` is selected, flags of 'loss' and 'gain will be created for basin or elevation respectively.  
     **For example:** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
-- **ex)
+-  ex)
 ```[difference_arrays]
 name:                      date1, difference_normalized
 action:                     compare, compare
 operator:                    less_than, greater_than, less_than, greater_than
 value:                          1700, -1, 20, -1.1
 ```
-this will yield ```self.overlap_conditional``` which masks nans and date1 depth < 1700 cm and normalized change < 20 or 2,000%
+Below config options will date1 depth < 1700 cm, normalized change < 20 or 2,000% and nans.  Saved to --->  ``self.overlap_conditional```
