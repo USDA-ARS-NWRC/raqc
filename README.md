@@ -74,12 +74,23 @@ moving_window_size:             3
 - ```[elevation_band_resolution]``` should be fine but also broad enough to get an adequate sample size (pixels) per elevation band.  ```[Elevation band resolution]``` sets increment sizes used to determine thresholds in```elevation_block``` flags.  When RAQC calculates ```elevation_blocks``` flags, outliers are defined based on normalized and raw snow depth difference at each elevation band.
 - ```[outlier_percentiles]``` = [thresh_upper_norm, thresh_upper_raw, thresh_lower_norm, thresh_lower_raw] in %.  These are the thresholding percentiles used to determine ```elevation_block_loss``` (thresh_lower...) and ```elevation_block_gain``` (thresh_upper...) flags.
 
-| **Elevation** | **95% change (m)** | **95% change ((date1 - date2)  date1)** | **5% change (m)** | **5% change ((date1 - date2)  date1)** |  **bin count** |
+**ex) Thresholding sample USCASJ20170402_to_20170605 difference DataFrame **
+
+| **Elevation (m)** | **95% change (m)** | **95% change ((date1 - date2) / date1)** | **5% change (m)** | **5% change ((date1 - date2) / date1)** |  **bin count** |
 | --- | --- | --- | --- | --- | --- |
 | 2800 | 103 | 1.99 | -304 | -1 | 23500 |
 | 2850 | 98 | 1.62 | -289 | -1 | 32400 |
 | 2900 | 115 | 2.80 | -274 | -1 | 10500 |
 | 2950 | 112 | 3.32 | -246 | -1 | 29600 |
+<i>95% and 5% refer to upper and lower thresholds respectively</i>
+
+### [options]
+<i>options for extra options in RAQC</i>
+- ```[include_arrays]```:  Option to save clipped snow depth files and difference matrices to another geotiff
+-```[include_masks]```: Option to add masks used in flag calculations to flag geotiff
+-```[interactive_plot]```: Will temporarilly pause during RAQC execution to display 2D histogram
+-```[remove_clipped_files]```: Delete clipped files ('...clipped_to...') created in clip_extent_overlap() 
+
 
 
 
