@@ -35,13 +35,6 @@ Here is a sample user configuration file (UserConfig) <i>Note: some options MAY 
 <i>required to visualize the 2D histogram when ```[options][interactive_plot] = y```</i>  
 - Clips array from ```[name]``` based on items ```[action]```, ```[operator]``` and ```[value]```.  
 - Default is snow depth less than 1700cm and normalized difference < 20 or 2,000%.
-- <b>ex)</b>  
-    
-
-### [flags]
-<i>this section enables user to select which flags to include in analysis, wheter to apply moving windows when applicable and how to define the construction of each flag.</i>
-- ```[flags]``` choose flags.  if ```basin_block``` or ```elevation block``` is selected, flags of 'loss' and 'gain will be created for basin or elevation respectively.  
-    **For example:** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
 -  ex) Below config options will create mask with date1 depth < 1700 cm, normalized change < 20 or 2,000% and nans.  
 
 ```[difference_arrays]
@@ -49,14 +42,22 @@ name:                      date1, difference_normalized
 action:                     compare, compare
 operator:                    less_than, greater_than, less_than, greater_than
 value:                          1700, -1, 20, -1.1
-```
+``` 
+
+### [flags]
+<i>this section enables user to select which flags to include in analysis, wheter to apply moving windows when applicable and how to define the construction of each flag.</i>
+- ```[flags]``` choose flags.  if ```basin_block```, ```elevation block``` or ```tree``` is selected, flags of 'loss' and 'gain' will be created for ```basin```, ```elevation``` or ```tree``` respectively.  
+    **For example:** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
+- ```[elevation_loss]``` and ```[elevation_gain]``` sections specifify whether to use ```difference``` and/or ```difference_normalized```.  If both selected, then logic is for **AND** i.e. <i>find outliers</i> where **both** ```difference``` & ```difference_normalized``` exceed elevation band thresholds.
+- ```[flags][tree]``` is derived from ```elevation_block``` and/or ```basin_block``` flags, but only flagged **IF** vegetation is present in pixel (currently defined as vegetation_height > 5m).
+- ```[tree_loss]``` and ```[tree_gain]``` are required items if ```[flags][tree]``` is specified.  The ```[tree]``` flag can combine or use ```elevation``` and ```basin``` flags individually or as compound conditions i.e. ```and``, ```or```.  Options are ```elevation```, ```basin```, ```or``` or ```and```.  
 
 ### [histogram_outliers]
 <i>sets parameters for 2D histogram space outliers</i>
 **ex) 
 - x-axis: ```date1``` 60 bins with a snow depth range of 0 to 1700cm and bin widths of ~ 28cm.  
-- y-axis: ```difference_normalized``` 200 bins with range of -1 to 20 and bin width of ~.10 or 10% change increments
-- ```threshold_space:  0.45, 1```: target cells with < ```0.45``` or 45% of cells within moving window of >= ```1``` bin count **will be flagged**
+- y-axis: ```[difference_normalized]``` 200 bins with range of -1 to 20 and bin width of ~.10 or 10% change increments
+- ```[threshold_histogram_space]:  0.45, 1```: target cells with < ```0.45``` or 45% of cells within moving window of >= ```1``` bin count **will be flagged**
 ```
 [histogram_outliers]
 histogram_mats:                date1, difference_normalized
@@ -65,7 +66,11 @@ threshold_histogram_space:     0.45, 1
 moving_window_name:            bins
 moving_window_size:             3
 ```
-
-
+### [block_behavior]
+sets paramaters for ```elevation_blocks``` and ```basin_blocks```
+- Items ```[moving_window_size]``` and ```[neighbor_threshold]``` same as in ```[histogram outliers]``` section
+- ```[snowline_threshold]``` has a default of 40cm based off trial and error.  This paramater is described in docstrings in raqc/raqc
+- ```[elevation_band_resolution]``` should be fine but also high broad enough to get an adequate sample size (pixels) per elevation band.  ```[Elevation band resolution]``` sets increment sizes used to determine thresholds in```elevation_block``` flags.  When RAQC calculates ```[flags][flags][elevation_blocks]``` flags, outliers are defined based on normalized and raw snow depth difference at each elevation band.
+- ```[outlier_percentiles]``` = [thresh_upper_norm, thresh_upper_raw, thresh_lower_norm, thresh_lower_raw] in %.  These are the thresholding percentiles used to determine ```elevation_block_loss``` (thresh_lower...) and ```elevation_block_gain``` (thresh_upper...).
 
 
