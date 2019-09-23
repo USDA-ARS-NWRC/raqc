@@ -75,6 +75,7 @@ moving_window_size:             3
 - ```[outlier_percentiles]``` = [thresh_upper_norm, thresh_upper_raw, thresh_lower_norm, thresh_lower_raw] in %.  These are the thresholding percentiles used to determine ```elevation_block_loss``` (thresh_lower...) and ```elevation_block_gain``` (thresh_upper...) flags.
 - **ex)**  
 | **Elevation** | **95% change (m)** | **95% change ((date1 - date2)  date1)** | **5% change (m)** | **5% change ((date1 - date2)  date1)** |  **bin count** |
+| --- | --- | --- | --- | --- | --- |
 | 2800 | 103 | 1.99 | -304 | -1 | 23500 |
 | 2850 | 98 | 1.62 | -289 | -1 | 32400 |
 | 2900 | 115 | 2.80 | -274 | -1 | 10500 |
