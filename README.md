@@ -32,8 +32,9 @@ To Run:
 
 Here is a sample user configuration file (UserConfig) <i>Note: some options MAY have changed</i>  
 ### [difference_arrays]  
-<i>required to visualize the 2D histogram with [options][interactive_plot] = y</i>
-Limited functionality currently.  Clips attributes from [name] based on operator [action], [operator] and [value].  Default is snow depth less than 1700cm and normalized difference < 20 or 2,000%.
+<i>required to visualize the 2D histogram with [options][interactive_plot] = y</i>  
+Clips array from [name] based on items [action], [operator] and [value].  
+Default is snow depth less than 1700cm and normalized difference < 20 or 2,000%.
 
 ## [flags]
 *this section enables user to select which flags to include in analysis, wheter to apply moving windows when applicable and how to define the construction of each flag.*
