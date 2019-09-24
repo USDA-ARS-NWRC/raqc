@@ -93,6 +93,26 @@ def main():
                     print('please answer "yes" or "no"')
                 break
 
+    # # check
+    # while True:
+    #         if ct == 0:
+    #             if want_plot == 'show':
+    #                 raqc_obj.plot_this(want_plot)
+    #                 break
+    #             elif want_plot == 'save':
+    #                 raqc_obj.plot_this(want_plot)
+    #                 break
+    #             elif want_plot == None:
+    #                 break
+    #             else:
+    #                 pass
+    #         else:
+    #             print("Only values accepted for [option][plots] are 'show', 'save' or None"
+    #                     "/nType 'n' to exit and fix UserConfig, or type one of the accepted values to continue'")
+    #             want_plot = input()
+    #             if want_plot.lower() == 'n':
+    #                 sys.exit('exiting program')
+    #
     # initiate raqc object with file paths
     raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'], cfg['paths']['file_path_in_date2'],
                 cfg['paths']['file_path_topo'], cfg['paths']['file_path_out'], cfg['paths']['basin'], cfg['paths']['file_name_modifier'],
@@ -143,9 +163,8 @@ def main():
         logic = [tree_loss, tree_gain]
         raqc_obj.flag_tree_blocks(logic)
 
-    want_plot = cfg['options']['interactive_plot']
-    if want_plot == True:
-        raqc_obj.plot_this()
+    want_plot = cfg['options']['plot']
+    raqc_obj.plot_this(want_plot)
 
     file_out = cfg['paths']['file_path_out']
     include_arrays = cfg['options']['include_arrays']
