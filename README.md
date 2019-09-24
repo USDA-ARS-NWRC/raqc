@@ -58,6 +58,8 @@ threshold_histogram_space:     0.45, 1
 moving_window_name:            bins
 moving_window_size:             3
 ```
+![image](https://raw.githubusercontent.com/USDA-ARS-NWRC/raqc/master/docs/placeholder_histogram.png)
+
 ### [block_behavior]
 <i> sets paramaters for ```elevation_blocks``` and ```basin_blocks```</i>
 - Items ```[moving_window_size]``` and ```[neighbor_threshold]``` same as in ```[histogram outliers]``` section
