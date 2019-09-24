@@ -11,21 +11,21 @@ Usage
 -----
 Currently takes two time-sequential geoTIFFs (.tif) and outputs a multi-banded boolean image which flags suspect and potentially bad pixel locations diagnosing different issues, such as too much positive change, negative change or spatially clustered change. More flags increase the likelihood that pixels are problematic. Certain flag combinations can be used to diagnose the type of error in data acquisition, processing or modeling responsible for the suspect data.
 
-RAQC was designed to **determine the quality** of snow depth images from lidar point clouds, and to further identify pixels and chunks of pixels that were **processed incorrectly.***  We ran into snow depth images where nans were represented by -9999 and 0 interchangeably.  This was problematic as 0 means 0m snow depth in much of the image where data WAS in fact collected.  Additionally, vegetation such as forests can lead to major errors in ranging measurements from lidar, wherein the digital surface model erroneously modelled lidar returns in branches, leaves, etc. as ground returns.  We attempted to flag suspect pixels and quantify the image as a whole as either "good" or "bad"
+RAQC was designed to **determine the quality** of snow depth images from lidar point clouds, and to further identify pixels and chunks of pixels that were **processed incorrectly.**  Processing errors and workflow flaws which produced these issues with our lidar-derived raster images resulted primarilly from: **1)** nans were represented by -9999 and 0 interchangeably.  This was problematic as 0 means 0m snow depth in much of the image where data WAS NOT collected.  Additionally, vegetation such as forests can lead to major errors in ranging measurements from lidar, wherein the digital surface model erroneously classifed vegetation regurns (branches, trees, etc) as ground returns.  We attempted to flag suspect pixels and quantify the image as a whole as either "good" or "bad"
 
 * Free software: GNU General Public License v3
 
 To Run:
 --------
-- RAQC utilizes a configuration file managed by inicheck (https://github.com/USDA-ARS-NWRC/inicheck).  User must set all parameters here and run throught the command line.
+<i>RAQC utilizes a configuration file managed by inicheck (https://github.com/USDA-ARS-NWRC/inicheck).  User must set all parameters here and run throught the command line.</i>
 
-Here is a sample user configuration file (UserConfig)... 
+Here is a breakdown of the configuration file(UserConfig) sections and short examples...  
 &nbsp;&nbsp;<i>Note: some options MAY have changed</i>  
 ### [difference_arrays]  
 <i>Helps to visualize the 2D histogram when ```[options][interactive_plot] = y```</i>  
 - Clips array from ```[name]``` based on items ```[action]```, ```[operator]``` and ```[value]```.  
-- the default is ```date1``` depth < 1700cm and ```normalized difference``` < 20 or 2,000%.
--  **ex)** Below config options will create mask with date1 depth < 1700 cm, normalized change < 20 or 2,000% and **NO** nans.  
+- The default is ```date1``` depth < 1700cm and ```normalized difference``` < 20 or 2,000%.
+-  **ex)** Below config options will create mask date1 depths > 1700 cm, normalized change > 20 or 2,000% and nans from 2D histogram and outliers:  
 
 ```[difference_arrays]
 name:                      date1, difference_normalized
@@ -37,15 +37,16 @@ value:                      1700, -1, 20, -1.1
 ### [flags]
 <i>this section enables user to select which flags to include in analysis, whether to apply moving windows when applicable and how to define the construction of each flag.</i>
 - The ```[flags]``` section chooses flags to compute.  If ```basin_block```, ```elevation block``` or ```tree``` is selected, 'loss' and 'gain' flags will be created for each of ```basin```, ```elevation``` or ```tree``` respectively.  
-    **ex)** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
+&nbsp;&nbsp;**ex)** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
 - ```[elevation_loss]``` and ```[elevation_gain]``` sections specifify whether to use ```difference``` and/or ```difference_normalized```.  If both selected, then logic is for **and** 
     - i.e. <i>find outliers</i> where **both** ```difference``` & ```difference_normalized``` exceed elevation band thresholds.
-- ```tree``` flag is composed of ```elevation_block``` and/or ```basin_block``` flags, but only flagged **if** vegetation is also present in pixel (<i>currently defined as vegetation_height > 5m from topo.nc</i>).
+- ```tree``` flag is composed of ```elevation_block``` and/or ```basin_block``` flags, but **only flagged if** <i>vegetation is also present</i> in pixel (<i>currently defined as vegetation_height > 5m from topo.nc</i>).
 - ```[tree_loss]``` and ```[tree_gain]``` are required items if ```[flags][tree]``` is specified.  The ```tree``` flag can combine or use ```elevation``` and ```basin``` flags individually or as compound conditions i.e. ```and``` or ```or```.  Options are ```elevation```, ```basin```, ```or``` or ```and```.  
 
 ### [histogram_outliers]
 <i>sets parameters for 2D histogram-space outliers</i>  
-**ex)** 
+
+**ex)**  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;```date1``` 60 bins with snow depth range 0 to 1700cm --> bin widths of ~ 28cm.  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;```difference_normalized``` 200 bins with range of -1 to 20 --> bin width of ~.10 or 10% change increments.
 - ```[threshold_histogram_space]:  0.45, 1```: target cells with < ```0.45``` (45%) of cells within moving window AND >= ```1``` bin count **will be flagged**
@@ -92,9 +93,9 @@ Using above table and UserConfig:
 ### [options]
 <i>options for extra options in RAQC</i>
 - ```[include_arrays]```:  Option to save clipped snow depth files and difference matrices to another geotiff
--```[include_masks]```: Option to add masks used in flag calculations to flag geotiff
--```[interactive_plot]```: Will temporarilly pause during RAQC execution to display 2D histogram
--```[remove_clipped_files]```: Delete clipped files ('...clipped_to...') created in clip_extent_overlap() 
+- ```[include_masks]```: Option to add masks used in flag calculations to flag geotiff  
+- ```[interactive_plot]```: Will temporarilly pause during RAQC execution to display 2D histogram  
+- ```[remove_clipped_files]```: Delete clipped files ('...clipped_to...') created in clip_extent_overlap() 
 
 
 
