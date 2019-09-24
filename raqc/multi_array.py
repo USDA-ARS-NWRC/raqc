@@ -7,15 +7,20 @@ from sklearn.feature_extraction import image
 import sys, os
 from subprocess import run
 from netCDF4 import Dataset
-import numpy_groupies as npg
 import time
 import pandas as pd
-import matplotlib
 from memory_profiler import profile
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, basin, file_name_modifier, elevation_band_resolution):
-
+        """
+        Initiate self and add attributes needed throughout RAQC run.
+        Ensure dates are in chronological order.
+        Check if input files have already been clipped. Note: User can either
+        provide input file paths that were already clipped,
+        i.e. USCATE20180528_to_20180423_SUPERsnow_depth.tif, or use file paths
+        of original files, and this will be checked in clip_overlap_extent()
+        """
         # Ensure that dataset 1 and dataset2 are in chronological order
         self.date1_string = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
         self.date2_string = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
@@ -37,17 +42,36 @@ class MultiArrayOverlap(object):
         year2 = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
         file_base = '{0}_to_{1}'.format(year1, year2)
         self.file_path_out_base = os.path.join(file_out_basin, file_base)
-        self.file_path_out_tif = '{0}_{1}.tif'.format(self.file_path_out_base, file_name_modifier)
+        self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_path_out_base, file_name_modifier)
+        self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_path_out_base, file_name_modifier)
         self.file_path_out_backup_config = '{0}_{1}'.format(self.file_path_out_base, 'raqc_backup_config.ini')
         self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_path_out_base)
+        self.elevation_band_resolution = elevation_band_resolution
         path_log_file = '{0}_memory_usage.log'.format(self.file_path_out_base)
         # log_file = open(path_log_file, 'w+')
 
-        # check if user passed clipped files in config file
-        string_match = 'clipped_to'
-        dem_clipped = self.file_path_out_base + '_dem_common_extent.tif'
-        self.already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2) & (os.path.isfile(dem_clipped))
+        # check if user decided to pass clipped files in config file
+        # Note: NOT ROBUST for user input error!
+        # i.e. if wrong basin ([file][basin]) in UserConfig, problems will emerge
+        string_match = 'to'
+        self.already_clipped =  (string_match in file_path_dataset1) & \
+                                (string_match in file_path_dataset2)
 
+        # clipped (common_extent) topo derived files must also be in directory
+        file_path_dem = self.file_path_out_base + '_dem_common_extent.tif'
+        file_path_veg = self.file_path_out_base + '_veg_height_common_extent.tif'
+
+        if self.already_clipped:
+            if not (os.path.isfile(file_path_dem) & os.path.isfile(file_path_veg)):
+                print(('{0}dem_common_extent and \n{0}_veg_height_common_extent'
+                '\nmust exist to pass clipped files directly in UserConfig').format(self.file_path_out_base))
+
+                sys.exit('Exiting ---- Ensure all clipped files present or simply'
+                '\npass original snow depth and topo files\n')
+            else:
+                pass
+
+        #
         if not self.already_clipped:
             self.file_path_dataset1 = file_path_dataset1
             self.file_path_dataset2 = file_path_dataset2
@@ -73,7 +97,7 @@ class MultiArrayOverlap(object):
                 self.mat_clip2 = self.get16bit(mat_clip2)
 
         if self.already_clipped:
-            with rio.open(file_path_topo) as src:
+            with rio.open(file_path_dem) as src:
                 topo = src
                 dem_clip = topo.read()
                 dem_clip = dem_clip[0]
@@ -82,15 +106,12 @@ class MultiArrayOverlap(object):
                 # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
                 self.check_DEM_resolution()
 
-        # we need this for later
-        self.elevation_band_resolution = elevation_band_resolution
-
     # @profile
     def clip_extent_overlap(self, remove_clipped_files):
         """
-        finds overlapping extent of two geotiffs. Saves as attributes clipped versions
-        of both matrices extracted from geotiffs, Also clips and outputs DEM and Vegetation
-        bands from topo.nc file.
+        finds overlapping extent of the input files (Geotiffs).  Adds clipped
+        matrices of input files as attributes, and additionally outputs geotiffs
+        of each (both snow dates, DEM, and Vegetation).
         """
         meta = self.meta  #metadata
         d1 = self.d1
@@ -116,8 +137,6 @@ class MultiArrayOverlap(object):
         if round(rez) == round(rez3):
             topo_rez_same = True
         else:
-            print('the resolution of your topo.nc file differs from repeat arrays.  It will be resized to' \
-            'fit the resolution repeat arrays.  your input file will NOT be changed')
             topo_rez_same = False
 
 
@@ -140,8 +159,8 @@ class MultiArrayOverlap(object):
         file_name_dataset2_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset2).split('/')[-1])[0]
         file_name_dataset2_te_first = os.path.splitext(file_name_dataset2_te_temp)[0][:id_date_start + 8]
         file_name_dataset2_te_second = os.path.splitext(file_name_dataset2_te_temp)[0][id_date_start:]
-        file_name_dataset1_te = os.path.join(self.file_out_basin, file_name_dataset1_te_first + '_clipped_to_' + file_name_dataset2_te_second + '.tif')
-        file_name_dataset2_te = os.path.join(self.file_out_basin, file_name_dataset2_te_first + '_clipped_to_' + file_name_dataset1_te_second + '.tif')
+        file_name_dataset1_te = os.path.join(self.file_out_basin, file_name_dataset1_te_first + '_to_' + file_name_dataset2_te_second + '.tif')
+        file_name_dataset2_te = os.path.join(self.file_out_basin, file_name_dataset2_te_first + '_to_' + file_name_dataset1_te_second + '.tif')
 
         # list of clipped files that are created in below code, and deleted upon user specification in UserConfig
         # the deleting of files was moved towards end of code to free up memory
@@ -151,16 +170,16 @@ class MultiArrayOverlap(object):
 
         if not (os.path.exists(file_name_dataset1_te)) & (os.path.exists(file_name_dataset2_te) & (os.path.exists(self.file_path_out_base + '_dem_common_extent.tif'))):
             # fun gdal command through subprocesses.run to clip and align to commom extent
-            print('This will overwrite the "_common_extent.tif" versions of both input files if they are already in exisitence (through this program)' +
-                    ' Ensure that file paths "<file_path_dataset1>_common_extent.tif" and "<file_path_dataset2>_common_extent.tif" do not exist or continue to replace them' +
-                    ' to proceed type "yes". to exit type "no"')
+            print(('This will overwrite the "_common_extent.tif" versions of both'
+            '\ninput files if they are already in exisitence (i.e. from raqc)'
+            '\nTo proceed type "yes".'
+            '\nTo exit program type "no"\n{0}').format('-'*60))
             while True:
                 response = input()
                 if response.lower() == 'yes':
                     run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
                                                                             self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
-                    # run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
-                    #                                                         self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
+
                     run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
                                                                             self.file_path_dataset2, file_name_dataset2_te) + ' -overwrite'
                     if topo_rez_same:
@@ -169,6 +188,10 @@ class MultiArrayOverlap(object):
                         run_arg3b = 'gdal_translate -of GTiff NETCDF:"{0}":veg_height {1}'.format(self.file_path_topo, self.file_path_out_base + '_veg_height.tif')
                         run(run_arg3b, shell=True)
                     else:
+                        print(('the resolution of your topo.nc file differs from repeat arrays.'
+                        '\nIt will be resized to fit the resolution repeat arrays.'
+                        '\nYour input file will NOT be changed'
+                        '\n{0}\n').format('--'*60))
                         run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}'.format(round(rez), self.file_path_topo, self.file_path_out_base + '_dem.tif')
                         print('Running DEM')
                         run(run_arg3, shell=True)
@@ -202,7 +225,7 @@ class MultiArrayOverlap(object):
         else:
             pass
 
-        #open newly created common extent tifs for use in further analyses
+        #open newly created clipped tifs for use in further analyses
         with rio.open(file_name_dataset1_te) as src:
             d1_te = src
             self.meta = d1_te.profile  # just need one meta data file because it's the same for both
@@ -230,7 +253,20 @@ class MultiArrayOverlap(object):
 
     # @profile
     def mask_basic(self):
+        """
+        Creates boolean masks and flags needed for multiple methods within RAQC, like
+        'mask_overlap_nan', and adds as attributes.  Also creates nested dictionary
+        used throughout RAQC to translate verbose config file names from .ini
+        file into more parsimonious abbreviations used in code
 
+        Outputs (attributes):
+        mask_overlap_nans:       mask - no nans present in any input matrices
+        flag_zero_and_nans:      flag - nans in one date and zeros in another
+                                    nans set to -9999
+        mask_nan_snow_present:   mask - snow is present in both dates, and no nans
+        all_gain:                mask from zero snow in date1 to snow of any amount
+                                    in date2.
+        """
         #Create master dictionary (key)
         operators = {'less_than':'<', 'greater_than':'>'}
 
@@ -259,9 +295,9 @@ class MultiArrayOverlap(object):
         zero_to_nan = date1_zero & (self.mat_clip2 == -9999)                               # m2_zeros and m1_nans
         self.flag_zero_and_nan = nan_to_zero | zero_to_nan
 
-        mat_diff_norm_nans = self.mat_diff_norm.copy()
-        mat_diff_norm_nans[~self.mask_overlap_nan] = np.nan
-        self.mat_diff_norm_nans = mat_diff_norm_nans
+        # mat_diff_norm_nans = self.mat_diff_norm.copy()
+        # mat_diff_norm_nans[~self.mask_overlap_nan] = np.nan
+        # self.mat_diff_norm_nans = mat_diff_norm_nans
 
         snow_present_mask = ~(date1_zero & date2_zero)  #snow present on at least one date
         self.mask_nan_snow_present = snow_present_mask & self.mask_overlap_nan  # combine nan-free mask with snow present mask
@@ -270,21 +306,20 @@ class MultiArrayOverlap(object):
 
     def mask_advanced(self, name, action, operation, value):
         """
-        Adds new masks to object:
-        1) overlap_nans: no nans present in any input matrices
-        2) flag_zero_and_nans: nans in one date and zeros in another
-        3) flag_extreme_outliers: all comparison conditions for each matrice (action, operation, val) are met
-        4) overlap_conditional: where flag_extreme_outliers AND overlap_nans occur
+        Creates mask with no nans and no outliers.  Useful for histogram 2D as
+        outliers ruin the visualtion.
 
         Arguments
         name: list of strings (1xN), matrix names to base map off of.
         action: Compare or not.  Only two options currently.  Can be expanded in future.
         operation:  (1x2N)list of strings, operation codes to be performed on each matrix
         value: list of floats (1x2N), matching value pairs to operation comparison operators.
+
+        Output (attribute):
+        mask_overlap_conditional:    mask - where no outliers of nans occur
         """
 
         print('Entered mask_advanced')
-
 
         shp = getattr(self, self.keys_master['config_to_mat_object'][name[0]]).shape
         # mask_overlap_conditional = np.zeros(shp, dtype = bool)
@@ -298,7 +333,6 @@ class MultiArrayOverlap(object):
             val = str(value[id])
             val2 = str(value[id + 1])
             cmd = '({0} {1} {2}) & ({3} {4} {5})'.format(mat_str, op_str, val, mat_str, op_str2, val2)
-            print(cmd)
             temp = eval(cmd)
             mask_overlap_conditional = mask_overlap_conditional & temp
         self.mask_overlap_conditional = mask_overlap_conditional & self.mask_overlap_nan
@@ -308,9 +342,13 @@ class MultiArrayOverlap(object):
     # @profile
     def make_diff_mat(self):
         """
-        Saves as attribute a normalized difference matrix of the two input tiffs
-        and one with nans (mat_diff_norm, mat_diff_norm_nans). difference between \
-        two dates is divided by raw depth on date 1 to normalize.
+        Saves as attribute a normalized difference matrix of the two input tiffs.
+        (Difference divided by date 1 raw depth).
+
+        Outputs (attributes):
+        all_loss:       mask - indicating snow of any amount in date1 to zero snow on date2
+        mat_diff:       matrix - date1 depth - date2 depth
+        mat_diff_norm:  matrix - mat_diff / date1
         """
         mat_clip1 = self.mat_clip1.copy()
         mat_clip2 = self.mat_clip2.copy()
@@ -323,8 +361,8 @@ class MultiArrayOverlap(object):
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
 
     def trim_extent_nan(self, name):
-        """Used to trim path and rows from array edges with na values.  Returns slimmed down matrix for \
-        display purposes and creates attribute of trimmed overlap_nan attribute.
+        """Used to trim path and rows from array edges with na values.
+        Returns slimmed down matrix for display purposes and saves as attribute.
 
         Args:
             name:    matrix name (string) to access matrix attribute
@@ -365,9 +403,9 @@ class MultiArrayOverlap(object):
     # @profile
     def save_tiff(self, fname, flags, include_arrays, include_masks):
         """
-        saves matix to geotiff using RasterIO basically. Specify one or more matrices in list of strings
-        with attribute names, or leave argv blank to get mat_diff_norm_nans along with all outlier types
-        as individual bands in multiband tiff.
+        Saves up to two geotiffs using RasterIO basically.  One tiff will be the
+        matrices of floats, and the second the masks and flags - booleans (uint8).
+        Bands to output will be specified in UserConfig
 
         Args:
             fname: filename including path of where to save
@@ -375,12 +413,22 @@ class MultiArrayOverlap(object):
             include_arrays: arrays (i.e. difference) to include as bands in tif
             include_masks: arrays (i.e. overlap_nan) to include as bands in tif
 
+        Outputs:
+            file_path_out_tiff_flags:   single or multibanded array which may
+                                        include any flag or mask
+            file_path_out_tiff_arrays:  single or multibanded array which may
+                                        include mat_diff and snow depth matrices
+                                        for example
         """
 
         tick = time.clock()
         # now that calculations complete (i.e. self.mat_diff > 1), set -9999 to nan
         self.mat_diff[~self.mask_nan_snow_present] = np.nan
         self.mat_diff_norm[~self.mask_nan_snow_present] = np.nan
+        self.mat_clip1 = np.ndarray.astype(self.mat_clip1, np.float32)
+        self.mat_clip2 = np.ndarray.astype(self.mat_clip2, np.float32)
+        self.mat_clip1[self.mat_clip1 == -9999] = np.nan
+        self.mat_clip2[self.mat_clip2 == -9999] = np.nan
         # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
         # self.mask_overlap_nan = ~self.mask_overlap_nan
 
@@ -404,42 +452,75 @@ class MultiArrayOverlap(object):
             for mask in include_masks:
                 flag_names.append('mask_' + mask)
 
-        if include_arrays != None:
-            for array in include_arrays:
-                flag_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
+        # if include_arrays != None:
+        #     for array in include_arrays:
+        #         flag_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
 
         # finally, change abbreviated object names to verbose, intuitive names
         band_names = self.apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
         # update metadata to reflect new band count
+        print(self.meta)
         self.meta.update({
-            'count': len(flag_names)})
+            'count': len(flag_names),
+            'dtype': 'uint8',
+            'nodata': 255})
 
         # Write new file
-        with rio.open(self.file_path_out_tif, 'w', **self.meta) as dst:
+        print(self.meta)
+        with rio.open(self.file_path_out_tif_flags, 'w', **self.meta) as dst:
             for id, band in enumerate(flag_names, start = 1):
                 try:
                     dst.write_band(id, getattr(self, flag_names[id - 1]))
                     dst.set_band_description(id, band_names[id - 1])
                 except ValueError:  # Rasterio has no float16  >> cast to float32
                     mat_temp = getattr(self, flag_names[id - 1])
+                    dst.write_band(id, mat_temp.astype('uint8'))
+                    dst.set_band_description(id, band_names[id - 1])
+
+        array_names = []
+        if include_arrays != None:
+            for array in include_arrays:
+                array_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
+
+        # finally, change abbreviated object names to verbose, intuitive names
+        band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
+        # update metadata to reflect new band count
+        self.meta.update({
+            'count': len(array_names),
+            'dtype': 'float32',
+            'nodata': -9999})
+
+        with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta) as dst:
+            for id, band in enumerate(array_names, start = 1):
+                try:
+                    dst.write_band(id, getattr(self, array_names[id - 1]))
+                    dst.set_band_description(id, band_names[id - 1])
+                except ValueError:  # Rasterio has no float16  >> cast to float32
+                    mat_temp = getattr(self, array_names[id - 1])
                     dst.write_band(id, mat_temp.astype('float32'))
                     dst.set_band_description(id, band_names[id - 1])
+
         tock = time.clock()
 
         # Now all is complete, DELETE clipped files from clip_extent_overlap()
         # Upon user specification in UserConfig,
-        if self.remove_clipped_files == True:
-            for file in self.new_file_list:
-                run('rm ' + file, shell = True)
+        try:
+            if self.remove_clipped_files == True:
+                for file in self.new_file_list:
+                    run('rm ' + file, shell = True)
+        except AttributeError:  #occurs if user passed clipped files through config
+            pass
 
         print('save tiff = ', round(tock - tick, 2), 'seconds')
 
-    def plot_this(self):
-        plot_basic(self)
+    def plot_this(self, action):
+        plot_basic(self, action)
 
     def check_DEM_resolution(self):
         """
-        Ensures that DEM resolution user specified on UserConfig can be partitioned into uint8 datatype
+        Brief method ensuring that DEM resolution from UserConfig can be partitioned
+        into uint8 datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
+        <= 255 elevation bands based on the elevation range of topo file.
         """
         min_elev, max_elev = np.min(self.dem_clip), np.max(self.dem_clip)
         num_elev_bins = math.ceil((max_elev - min_elev) / self.elevation_band_resolution)
@@ -476,6 +557,9 @@ class MultiArrayOverlap(object):
         return(array_cm)
 
     def apply_dict(self, original_list, dictionary, nested_key):
+        """
+        Basically translates Config file names into attribute names if necessary
+        """
         keyed_list = []
         for val in original_list:
             try:
@@ -490,22 +574,24 @@ class PatternFilters():
     # @profile
     def mov_wind(self, name, size):
         """
-         Slow moving window base function which adjusts window sizes to fit along
-         matrix edge, as opposed to mov_wind2 which is faster, but trims output (pct) to ~ (M - size) x (N - size),
-         if original matrix accessec with 'name' was M x N.
-         Beta version of function. Can add other filter/kernels to moving window calculation
-         as needed.  Returns pct, which has the proportion of cells/pixels with values > 0 present in each
-         moving window centered at target pixel.
+         Moving window operation which adjusts window sizes to fit along
+         matrix edges. As opposed to mov_wind2 which is faster, but trims yields
+         an output matrix (pct) smaller than the input matrix.
+         From Input Size = M x N ---> Output Size = (M - size) x (N - size).
+         Beta version of function. Can add other filter/kernels to moving window
+         calculation as needed.
 
          Args:
-            name:  matrix name (string) to access matrix attribute. Matrix must be a boolean.
-            size:  moving window size - i.e. size x size.  For example, if size = 5, moving window is a
-                    5x5 cell square
+            name:  matrix name (string) to access matrix attribute. Matrix must
+                    be a boolean.
+            size:  moving window size - i.e. size x size.  For example, if size = 5,
+                    moving window is a 5x5 cell square.
         Returns:
-            pct:    Proporttion (mislabeled as percentage and abbreviated to pct for easier recognition and code readability) \
-                    This is the proportion of cells within moving window that have neighboring cells with values.
-                    For example a 5 x 5 window with 5 of the 25 cells having a value, including the target cell, would have \
-                    a pct = 0.20.  The target cell would be the center cell at row 3 col 3.
+            pct:    Proportion of cells within moving window that have neighboring
+                    cells with values.
+                    For example a 5 x 5 window with 5 of 25 cells having a value,
+                    target cell included, would have a pct = 5/25 = 0.20.
+                    The target cell is at the center cell at row 3 col 3 in this case.
          """
 
         print('entered histogram moving window')
@@ -545,6 +631,7 @@ class PatternFilters():
                 base_row = np.ravel(np.tile(row_idx, (len(col_idx),1)), order = 'F') + i
                 base_col = np.ravel(np.tile(col_idx, (len(row_idx),1))) + j
                 sub = mat[base_row, base_col]
+                #NOTE:  this can be CUSTOMIZED! Instead of pct, calculate other metric
                 pct[i,j] = (np.sum(sub > 0)) / sub.shape[0]
         tock = time.clock()
         print('mov_wind zach version = ', tock - tick, 'seconds')
@@ -553,9 +640,10 @@ class PatternFilters():
     # @profile
     def mov_wind2(self, name, size):
         """
-        Orders and orders of magnitude faster moving window function than mov_wind().  Uses numpy bitwise operator
-        wrapped in sklearn package to 'stride' across matrix cell by cell. Trims output (pct) to ~ (M - size) X (N - size)
-        if original matrix accessed by 'name' was M x N.
+        Orders and orders of magnitude faster moving window function than mov_wind().
+        Uses numpy bitwise operator wrapped in sklearn package to 'stride' across
+        matrix cell by cell. Trims output (pct) size from input size of M x N to
+        (M - size) X (N - size).
 
         Args:
             name:  matrix name (string) to access matrix attribute. Matrix must be a boolean
@@ -584,20 +672,34 @@ class PatternFilters():
 
 class Flags(MultiArrayOverlap, PatternFilters):
     def init(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, basin, file_name_modifier):
+        """
+        Protozoic attempt of use of inheritance
+        """
         MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, basin, file_name_modifier)
+
     # @profile
     def make_histogram(self, name, nbins, thresh, moving_window_size):
         """
-        Creates histogram and finds outliers.  Outlier detection is pretty crude and could benefit from more sophisticated
-        2D kernel detecting change. Saves as a flag, self.flag_hist, to object as an attribute which locates histogram outliers
+        Creates 2D histogram and finds outliers.  Outlier detection is pretty crude
+        and could benefit from more sophisticated 2D kernel detecting change.
+        Saves outlier flags as attribute ---> self.flag_hist.
 
         Args:
-            name:  matrix name (string) to access matrix attribute.
-            nbins:  1 x 2 list.  Value one is the number of bins in x and Value two is number of bins in y direction
-            thresh:  1 x 2 list.  Value one is the proportion of cells within moving window (i.e. 'pct') that must be
-                        present to retain in flag_hist_outliers. Value 2 is the minimum bin count to be retained as
-                        flag_hist_outlier
-            moving_window_size:  Integer.  Size of side of square in pixels of kernel/filter used in moving window.
+            name:               matrix name (string) to access matrix attribute.
+            nbins:              1 x 2 list.  First value is the number of x axis bins
+                                Second value is the number of y axis bins
+            thresh:             1 x 2 list.  First value is threshold of the proportion
+                                of cells within moving window (i.e. 'pct') required to qualify
+                                as a flag. If pct < thresh, flag = True
+                                The second value is the minimum bin count of outlier
+                                in histogram space. i.e. user may want only bins with
+                                counts > 10 for instance.
+            moving_window_size:  Integer.  Size of side of square in pixels of
+                                kernel/filter used in moving window.
+
+        Outputs:
+            flag_histogram:     flags in map space where meeting x, y values of flags
+                                from histogram space (i.e. self.outliers_hist_space)
         """
         # I don't think an array with nested tuples is computationally efficient.  Find better data structure for the tuple_array
         print('entering make_histogram')
@@ -637,14 +739,19 @@ class Flags(MultiArrayOverlap, PatternFilters):
     def flag_basin_blocks(self, apply_moving_window, moving_window_size, neighbor_threshold, snowline_threshold):
         """
         Finds cells of complete melt or snow where none existed prior.
-        Apply moving window to remove scattered, individual cells and flag larger blocks of cells.
-        Used to diagnose extreme, unrealistic change that were potentially processed incorrectly
-        Saves flag_basin_gain and flag_basin_loss to object.
+        Apply moving window to remove scattered and isolated cells, ineffect
+        highlighting larger blocks of cells.  Intended to diagnose extreme, unrealistic
+        change that were potentially processed incorrectly by ASO.
 
         Args:
+            apply_moving_window:  Boolean.  Moving window is optional.
             moving_window_size:   size of moving window used to define blocks
             neighbor_threshold:   proportion of neighbors within moving window (including target cell) that have
             snowline_threshold:   mean depth of snow in elevation band used to determine snowline
+
+        Outputs:
+            flag_basin_gain:      all_gain blocks
+            flag_basin_loss:      all_loss_blocks
 
         """
         # Note below ensures -0.0 and 0 and 0.0 are all discovered and flagged as zeros.
@@ -661,7 +768,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
         basin_gain = self.mask_overlap_nan & self.all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
 
         if apply_moving_window:
-            print('did apply moving window')
             pct = self.mov_wind2(basin_loss, moving_window_size)
             self.flag_basin_loss = (pct > neighbor_threshold) & self.all_loss
             pct = self.mov_wind2(basin_gain, moving_window_size)
@@ -675,12 +781,19 @@ class Flags(MultiArrayOverlap, PatternFilters):
     def flag_elevation_blocks(self, apply_moving_window, moving_window_size, neighbor_threshold, snowline_threshold, outlier_percentiles,
                     elevation_thresholding):
         """
-        More potential for precision than flag_basin_blocks function.  Finds outliers in relation to their elevation bands for snow gain and loss.
-        Saves as attributes to object flag_elevation_gain and flag_elevation_loss.  By default, elevation gain finds pixels where BOTH raw snow gained AND
-        normalized snow gained were greater than outlier_percentiles.  Elevation loss thresholds ONLY on raw snow lost as relative snow lost
-        is -1 or -100% for much of the lower and mid elevations in the melt season, making relative snow loss unreliable.  Both flags are further
-        filtered with mov_wind2 to ensure neighboring pixels had similiar behavior.  This is a safeguard against outliers.
+        More potential for precision than flag_basin_blocks function.  Finds outliers
+        in relation to their elevation bands for snow gain and loss and adds as attributed
+        By default in CoreConfig, elevation gain finds pixels where BOTH raw snow gained AND
+        normalized snow gained were greater than outlier_percentiles.
+        Alternatively, Elevation loss uses ONLY raw snow lost as relative snow lost
+        can be total  (i.e. -1 or -100%) for much of the lower and mid elevations during the melt season,
+        making relative snow loss an unreliable indicator.  Apply moving window to
+        remove scattered and isolated cells, ineffect highlighting larger blocks of cells.
+        Elevation band outlier statistics saved to DataFrame, which can be output
+        as CSV per UserConfig request.
+
         Args:
+            apply_moving_window: Boolean. Moving window is optional
             moving_window_size:  Same as flag_basin_blocks
             neighbor_threshold:  Same as flag_basin_blocks
             snowline_threshold:  Same as flag_basin_blocks
@@ -688,6 +801,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                     Percentiles used to threshold each elevation band.  i.e. 95 in (95,80,10,10) is the raw gain upper,
                                     which means anything greater than the 95th percentile of raw snow gain in each elevatin band will
                                     be flagged as an outlier.
+        Output:
+            flag_elevation_loss:  attribute
+            flag_elevation_gain   attribute
         """
         print('entering flag_elevation_blocks')
         # Masking bare ground areas because zero change in snow depth will skew distribution from which thresholds are based
@@ -796,11 +912,18 @@ class Flags(MultiArrayOverlap, PatternFilters):
     # @profile
     def snowline(self, snowline_threshold):
         """
-        Finds the snowline based on the snowline_threshold, or the user specified minimum snow depth.  The lowest elevation band
-        with a mean snow depth at the snowline threshold is set as the snowline.  This value is later used to discard outliers below
-        snowline.
+        Finds the snowline based on the snowline_threshold. The lowest elevation
+        band with a mean snow depth >= the snowline threshold is set as the snowline.
+        This value is later used to discard outliers below snowline.
+        Additionaly, tree presence is determined from the topo.nc file and saved
+        as attribute.
         Args:
-            snowline:       explained above
+            snowline_threshold:     Minimum average snow depth within elevation band,
+                                    which defines snowline_elev.  In Centimeters
+        Output:
+            snowline_elev:      Lowest elevation where snowline_threshold is
+                                first encountered
+            veg_presence:       cells with vegetation height > 5m from the topo.nc file.
         """
         # use overlap_nan mask for snowline because we want to get average snow per elevation band INCLUDING zero snow depth
         dem_clip_conditional = self.dem_clip[self.mask_overlap_nan]
@@ -839,14 +962,17 @@ class Flags(MultiArrayOverlap, PatternFilters):
             self.veg_height_clip = veg_height_clip[0]
         self.veg_presence = self.veg_height_clip > 5
 
-        print(('The snowline was determined to be at {0}m. \nIt was defined as the first elevation band in the basin'
-                'with a mean snow depth >= {1}. \nElevation bands were in {2}m increments ').
+        print(('The snowline was determined to be at {0}m.'
+                '\nIt was defined as the first elevation band in the basin'
+                '\nwith a mean snow depth >= {1}.'
+                ' \nElevation bands were in {2}m increments ').
                 format(self.snowline_elev, snowline_threshold, self.elevation_band_resolution))
 
     def flag_tree_blocks(self, logic):
 
         """
-        These are areas with EITHER flag_elevation_gain/loss OR flag_basin_bain/loss with trees present.
+        These are cells with EITHER flag_elevation_gain/loss AND/OR
+        flag_basin_bain/loss with trees present.
         Tree presense is determined from topo.nc vegetation band.
         """
 
@@ -858,16 +984,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
         # get basin and elevation flags if requested
         for i, logic in enumerate(logic):
             tree_flag_name = key[flag_options[i]]['flag_tree_name']
-            if 'temp_basin' not in locals():
-                try:
-                    temp_basin = getattr(self, key[flag_options[i]]['basin'])
-                except AttributeError:
-                    pass
-            if 'temp_elevation' not in locals():
-                try:
-                    temp_elevation = getattr(self, key[flag_options[i]]['elevation'])
-                except AttributeError:
-                    pass
+            temp_basin = getattr(self, key[flag_options[i]]['basin'])
+            temp_elevation = getattr(self, key[flag_options[i]]['elevation'])
 
             if logic == 'or':
                 setattr(self, tree_flag_name, (temp_basin | temp_elevation) & self.veg_presence)
