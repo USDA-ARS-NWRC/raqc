@@ -18,7 +18,7 @@ class MultiArrayOverlap(object):
         Ensure dates are in chronological order.
         Check if input files have already been clipped. Note: User can either
         provide input file paths that were already clipped,
-        i.e. USCATE20180528_clipped_to_20180423_SUPERsnow_depth.tif, or use file paths
+        i.e. USCATE20180528_to_20180423_SUPERsnow_depth.tif, or use file paths
         of original files, and this will be checked in clip_overlap_extent()
         """
         # Ensure that dataset 1 and dataset2 are in chronological order
@@ -46,14 +46,32 @@ class MultiArrayOverlap(object):
         self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_path_out_base, file_name_modifier)
         self.file_path_out_backup_config = '{0}_{1}'.format(self.file_path_out_base, 'raqc_backup_config.ini')
         self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_path_out_base)
+        self.elevation_band_resolution = elevation_band_resolution
         path_log_file = '{0}_memory_usage.log'.format(self.file_path_out_base)
         # log_file = open(path_log_file, 'w+')
 
-        # check if user passed clipped files in config file
-        string_match = 'clipped_to'
-        dem_clipped = self.file_path_out_base + '_dem_common_extent.tif'
-        self.already_clipped =  (string_match in file_path_dataset1) & (string_match in file_path_dataset2) & (os.path.isfile(dem_clipped))
+        # check if user decided to pass clipped files in config file
+        # Note: NOT ROBUST for user input error!
+        # i.e. if wrong basin ([file][basin]) in UserConfig, problems will emerge
+        string_match = 'to'
+        self.already_clipped =  (string_match in file_path_dataset1) & \
+                                (string_match in file_path_dataset2)
 
+        # clipped (common_extent) topo derived files must also be in directory
+        file_path_dem = self.file_path_out_base + '_dem_common_extent.tif'
+        file_path_veg = self.file_path_out_base + '_veg_height_common_extent.tif'
+
+        if self.already_clipped:
+            if not (os.path.isfile(file_path_dem) & os.path.isfile(file_path_veg)):
+                print(('{0}dem_common_extent and \n{0}_veg_height_common_extent'
+                '\nmust exist to pass clipped files directly in UserConfig').format(self.file_path_out_base))
+
+                sys.exit('Exiting ---- Ensure all clipped files present or simply'
+                '\npass original snow depth and topo files\n')
+            else:
+                pass
+
+        #
         if not self.already_clipped:
             self.file_path_dataset1 = file_path_dataset1
             self.file_path_dataset2 = file_path_dataset2
@@ -79,7 +97,7 @@ class MultiArrayOverlap(object):
                 self.mat_clip2 = self.get16bit(mat_clip2)
 
         if self.already_clipped:
-            with rio.open(file_path_topo) as src:
+            with rio.open(file_path_dem) as src:
                 topo = src
                 dem_clip = topo.read()
                 dem_clip = dem_clip[0]
@@ -87,9 +105,6 @@ class MultiArrayOverlap(object):
                 self.dem_clip = dem_clip
                 # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
                 self.check_DEM_resolution()
-
-        # we need this for later
-        self.elevation_band_resolution = elevation_band_resolution
 
     # @profile
     def clip_extent_overlap(self, remove_clipped_files):
@@ -144,8 +159,8 @@ class MultiArrayOverlap(object):
         file_name_dataset2_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset2).split('/')[-1])[0]
         file_name_dataset2_te_first = os.path.splitext(file_name_dataset2_te_temp)[0][:id_date_start + 8]
         file_name_dataset2_te_second = os.path.splitext(file_name_dataset2_te_temp)[0][id_date_start:]
-        file_name_dataset1_te = os.path.join(self.file_out_basin, file_name_dataset1_te_first + '_clipped_to_' + file_name_dataset2_te_second + '.tif')
-        file_name_dataset2_te = os.path.join(self.file_out_basin, file_name_dataset2_te_first + '_clipped_to_' + file_name_dataset1_te_second + '.tif')
+        file_name_dataset1_te = os.path.join(self.file_out_basin, file_name_dataset1_te_first + '_to_' + file_name_dataset2_te_second + '.tif')
+        file_name_dataset2_te = os.path.join(self.file_out_basin, file_name_dataset2_te_first + '_to_' + file_name_dataset1_te_second + '.tif')
 
         # list of clipped files that are created in below code, and deleted upon user specification in UserConfig
         # the deleting of files was moved towards end of code to free up memory
@@ -210,7 +225,7 @@ class MultiArrayOverlap(object):
         else:
             pass
 
-        #open newly created common extent tifs for use in further analyses
+        #open newly created clipped tifs for use in further analyses
         with rio.open(file_name_dataset1_te) as src:
             d1_te = src
             self.meta = d1_te.profile  # just need one meta data file because it's the same for both
@@ -444,9 +459,14 @@ class MultiArrayOverlap(object):
         # finally, change abbreviated object names to verbose, intuitive names
         band_names = self.apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
         # update metadata to reflect new band count
+        print(self.meta)
         self.meta.update({
-            'count': len(flag_names)})
+            'count': len(flag_names),
+            'dtype': 'uint8',
+            'nodata': 255})
+
         # Write new file
+        print(self.meta)
         with rio.open(self.file_path_out_tif_flags, 'w', **self.meta) as dst:
             for id, band in enumerate(flag_names, start = 1):
                 try:
@@ -454,7 +474,7 @@ class MultiArrayOverlap(object):
                     dst.set_band_description(id, band_names[id - 1])
                 except ValueError:  # Rasterio has no float16  >> cast to float32
                     mat_temp = getattr(self, flag_names[id - 1])
-                    dst.write_band(id, mat_temp.astype('float32'))
+                    dst.write_band(id, mat_temp.astype('uint8'))
                     dst.set_band_description(id, band_names[id - 1])
 
         array_names = []
@@ -466,7 +486,9 @@ class MultiArrayOverlap(object):
         band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
         # update metadata to reflect new band count
         self.meta.update({
-            'count': len(array_names)})
+            'count': len(array_names),
+            'dtype': 'float32',
+            'nodata': -9999})
 
         with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta) as dst:
             for id, band in enumerate(array_names, start = 1):
@@ -482,9 +504,12 @@ class MultiArrayOverlap(object):
 
         # Now all is complete, DELETE clipped files from clip_extent_overlap()
         # Upon user specification in UserConfig,
-        if self.remove_clipped_files == True:
-            for file in self.new_file_list:
-                run('rm ' + file, shell = True)
+        try:
+            if self.remove_clipped_files == True:
+                for file in self.new_file_list:
+                    run('rm ' + file, shell = True)
+        except AttributeError:  #occurs if user passed clipped files through config
+            pass
 
         print('save tiff = ', round(tock - tick, 2), 'seconds')
 
