@@ -54,8 +54,18 @@ class MultiArrayOverlap(object):
         # Note: NOT ROBUST for user input error!
         # i.e. if wrong basin ([file][basin]) in UserConfig, problems will emerge
         string_match = 'to'
-        self.already_clipped =  (string_match in file_path_dataset1) & \
+        # this will yield 0, 1 or 2, coding for which files were passed
+        check_for_clipped =  (string_match in file_path_dataset1) + \
                                 (string_match in file_path_dataset2)
+
+        if check_for_clipped == 0:
+            self.already_clipped = False
+        elif check_for_clipped == 2:
+            self.already_clipped = True
+        elif check_for_clipped == 1:
+            print('it appears one snow date is clipped already and one is not'
+                '\n please ensure that both are either clipped or original \n')
+            sys.exit('program will exit to fix problem ---')
 
         # clipped (common_extent) topo derived files must also be in directory
         file_path_dem = self.file_path_out_base + '_dem_common_extent.tif'
@@ -78,33 +88,33 @@ class MultiArrayOverlap(object):
             self.file_path_topo = file_path_topo
             self.file_out_basin = file_out_basin
 
-        # Grab arrays and spatial metadata
-        with rio.open(file_path_dataset1) as src:
-            self.d1 = src
-            self.meta = self.d1.profile
-            if self.already_clipped:
-                mat_clip1 = self.d1.read()  #matrix
-                mat_clip1 = mat_clip1[0]
-                mat_clip1[np.isnan(mat_clip1)] = -9999
-                self.mat_clip1 = self.get16bit(mat_clip1)
-        with rio.open(file_path_dataset2) as src:
-            self.d2 = src
-            self.meta2 = self.d2.profile
-            if self.already_clipped:
-                mat_clip2 = self.d2.read()  #matrix
-                mat_clip2 = mat_clip2[0]
-                mat_clip2[np.isnan(mat_clip2)] = -9999
-                self.mat_clip2 = self.get16bit(mat_clip2)
+        # #Grab arrays and spatial metadata
+        # if self.already_clipped:
+            # with rio.open(file_path_dataset1) as src:
+            #     d1 = src
+            #     mat_clip1 = d1.read()  #matrix
+            #     mat_clip1 = mat_clip1[0]
+            #     mat_clip1[np.isnan(mat_clip1)] = -9999
+            #     self.mat_clip1 = self.get16bit(mat_clip1)
+            # with rio.open(file_path_dataset2) as src:
+            #     d2 = src
+            #     self.meta2 = d2.profile
+            #     mat_clip2 = d2.read()  #matrix
+            #     mat_clip2 = mat_clip2[0]
+            #     mat_clip2[np.isnan(mat_clip2)] = -9999
+            #     self.mat_clip2 = self.get16bit(mat_clip2)
+            # with rio.open(file_path_dem) as src:
+            #     topo = src
+            #     dem_clip = topo.read()
+            #     dem_clip = dem_clip[0]
+            #     dem_clip[np.isnan(dem_clip)] = -9999
+            #     self.dem_clip = dem_clip
+            #     # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
+            #     self.check_DEM_resolution()
 
-        if self.already_clipped:
-            with rio.open(file_path_dem) as src:
-                topo = src
-                dem_clip = topo.read()
-                dem_clip = dem_clip[0]
-                dem_clip[np.isnan(dem_clip)] = -9999
-                self.dem_clip = dem_clip
-                # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
-                self.check_DEM_resolution()
+        self.file_name_date1_clipped = file_path_dataset1
+        self.file_name_date2_clipped = file_path_dataset2
+        self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
 
     # @profile
     def clip_extent_overlap(self, remove_clipped_files):
@@ -113,9 +123,15 @@ class MultiArrayOverlap(object):
         matrices of input files as attributes, and additionally outputs geotiffs
         of each (both snow dates, DEM, and Vegetation).
         """
-        meta = self.meta  #metadata
-        d1 = self.d1
-        d2 = self.d2
+
+        with rio.open(self.file_path_dataset1) as src:
+            d1 = src
+            meta = d1.profile
+
+        with rio.open(self.file_path_dataset2) as src:
+            d2 = src
+            self.meta2 = d2.profile
+
         #grab basics
         rez = meta['transform'][0]  # spatial resolution
         rez2 = self.meta2['transform'][0]
@@ -124,12 +140,14 @@ class MultiArrayOverlap(object):
         topo = Dataset(self.file_path_topo)
         x = topo.variables['x'][:]
         y = topo.variables['y'][:]
-        topo_extents = [None] * 4
-        topo_extents[0], topo_extents[1], topo_extents[2], topo_extents[3], = x.min(), y.min(), x.max(), y.max()
         rez3 = x[1] - x[0]
+        topo_extents = [None] * 4
+        topo_extents[0], topo_extents[1], topo_extents[2], topo_extents[3], = \
+            x.min(), y.min(), x.max(), y.max()
 
-        # check that resolutions are the same.  Note: if rez not a whole number, it will be rounded and rasters aligned
-        if round(rez) == round(rez2):  # janky way to check that all three rez are the same
+        # check that resolutions are the same.  Note: if rez not a whole number,
+        # it will be rounded and rasters aligned
+        if round(rez) == round(rez2):  #hack way to check all three rez the same
             pass
         else:
             sys.exit("check that spatial resolution of your two repeat array files are the same' \
@@ -140,116 +158,155 @@ class MultiArrayOverlap(object):
             topo_rez_same = False
 
 
-        # grab bounds of common/overlapping extent and prepare function call for gdal to clip to extent and align
+        # grab bounds of common/overlapping extent and prepare function call for
+        # gdal to clip to extent and align
         left_max_bound = max(d1.bounds.left, d2.bounds.left, topo_extents[0])
         bottom_max_bound = max(d1.bounds.bottom, d2.bounds.bottom, topo_extents[1])
         right_min_bound =  min(d1.bounds.right, d2.bounds.right, topo_extents[2])
         top_min_bound = min(d1.bounds.top, d2.bounds.top, topo_extents[3])
+        self.d1, self.d2 = d1, d2
+
         # ensure nothing after decimal - nice whole number, admittedly a float
         left_max_bound = left_max_bound - (left_max_bound % round(rez))
         bottom_max_bound = bottom_max_bound + (round(rez) - bottom_max_bound % round(rez))
         right_min_bound = right_min_bound - (right_min_bound % round(rez))
         top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
 
+        # determine if extents of snow files are the same
+        extents_same =  (d1.bounds.left == d2.bounds.left) & \
+                        (d1.bounds.bottom == d2.bounds.bottom) & \
+                        (d1.bounds.right == d2.bounds.right) & \
+                        (d1.bounds.top == d2.bounds.top)
+
         # Create file paths and names
-        file_name_dataset1_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset1).split('/')[-1])[0]   #everythong after last / without filename ext (i.e. .tif)
-        id_date_start = file_name_dataset1_te_temp.index('2')  #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
-        file_name_dataset1_te_first = os.path.splitext(file_name_dataset1_te_temp)[0][:id_date_start + 8]
-        file_name_dataset1_te_second = os.path.splitext(file_name_dataset1_te_temp)[0][id_date_start:]
-        file_name_dataset2_te_temp = os.path.splitext(os.path.expanduser(self.file_path_dataset2).split('/')[-1])[0]
-        file_name_dataset2_te_first = os.path.splitext(file_name_dataset2_te_temp)[0][:id_date_start + 8]
-        file_name_dataset2_te_second = os.path.splitext(file_name_dataset2_te_temp)[0][id_date_start:]
-        file_name_dataset1_te = os.path.join(self.file_out_basin, file_name_dataset1_te_first + '_to_' + file_name_dataset2_te_second + '.tif')
-        file_name_dataset2_te = os.path.join(self.file_out_basin, file_name_dataset2_te_first + '_to_' + file_name_dataset1_te_second + '.tif')
+        file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
+                                    (self.file_path_dataset1).split('/')[-1])[0]
+        #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
+        id_date_start = file_name_date1_te_temp.index('2')
+        file_name_date1_te_first = os.path.splitext \
+                                    (file_name_date1_te_temp)[0][:id_date_start + 8]
+        file_name_date1_te_second = os.path.splitext \
+                                    (file_name_date1_te_temp)[0][id_date_start:]
+        file_name_date2_te_temp = os.path.splitext(os.path.expanduser \
+                                    (self.file_path_dataset2).split('/')[-1])[0]
+        file_name_date2_te_first = os.path.splitext \
+                                    (file_name_date2_te_temp)[0][:id_date_start + 8]
+        file_name_date2_te_second = os.path.splitext \
+                                    (file_name_date2_te_temp)[0][id_date_start:]
+        file_name_date1_te = os.path.join(self.file_out_basin, \
+                                            file_name_date1_te_first + '_to_' + \
+                                            file_name_date2_te_second + '.tif')
+        file_name_date2_te = os.path.join(self.file_out_basin, \
+                                            file_name_date2_te_first + '_to_' +  \
+                                            file_name_date1_te_second + '.tif')
 
         # list of clipped files that are created in below code, and deleted upon user specification in UserConfig
         # the deleting of files was moved towards end of code to free up memory
         self.remove_clipped_files = remove_clipped_files
-        self.new_file_list = [file_name_dataset1_te, file_name_dataset2_te, self.file_path_out_base + '_dem_common_extent.tif', self.file_path_out_base + '_veg_height_common_extent.tif']
+        self.new_file_list = [file_name_date1_te, file_name_date2_te, \
+                            self.file_path_out_base + '_dem_common_extent.tif', \
+                            self.file_path_out_base + '_veg_height_common_extent.tif']
                 #Check if file already exists
 
-        if not (os.path.exists(file_name_dataset1_te)) & (os.path.exists(file_name_dataset2_te) & (os.path.exists(self.file_path_out_base + '_dem_common_extent.tif'))):
-            # fun gdal command through subprocesses.run to clip and align to commom extent
-            print(('This will overwrite the "_common_extent.tif" versions of both'
-            '\ninput files if they are already in exisitence (i.e. from raqc)'
-            '\nTo proceed type "yes".'
-            '\nTo exit program type "no"\n{0}').format('-'*60))
-            while True:
-                response = input()
-                if response.lower() == 'yes':
-                    run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
-                                                                            self.file_path_dataset1, file_name_dataset1_te) + ' -overwrite'
+        if not (os.path.exists(file_name_date1_te)) & \
+                (os.path.exists(file_name_date2_te) & \
+                (os.path.exists(self.file_path_out_base + '_dem_common_extent.tif'))):
 
-                    run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
-                                                                            self.file_path_dataset2, file_name_dataset2_te) + ' -overwrite'
-                    if topo_rez_same:
-                        run_arg3 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format(self.file_path_topo, self.file_path_out_base + '_dem.tif')
-                        run(run_arg3, shell=True)
-                        run_arg3b = 'gdal_translate -of GTiff NETCDF:"{0}":veg_height {1}'.format(self.file_path_topo, self.file_path_out_base + '_veg_height.tif')
-                        run(run_arg3b, shell=True)
-                    else:
-                        print(('the resolution of your topo.nc file differs from repeat arrays.'
-                        '\nIt will be resized to fit the resolution repeat arrays.'
-                        '\nYour input file will NOT be changed'
-                        '\n{0}\n').format('--'*60))
-                        run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}'.format(round(rez), self.file_path_topo, self.file_path_out_base + '_dem.tif')
-                        print('Running DEM')
-                        run(run_arg3, shell=True)
-                        run_arg3b = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":veg_height {2}'.format(round(rez), self.file_path_topo, self.file_path_out_base + '_veg_height.tif')
-                        print('Running VEG')
-                        run(run_arg3b, shell=True)
+            # START Clipping
+            if not extents_same:
+                # if date1 and date2 have different extents  ---> clip
+                run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
+                (left_max_bound, bottom_max_bound, right_min_bound, top_min_bound, \
+                self.file_path_dataset1, file_name_date1_te) + ' -overwrite'
 
 
-                    run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
-                                                                            self.file_path_out_base + '_dem.tif', self.file_path_out_base + '_dem_common_extent.tif -overwrite')
-                    run_arg4b = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format(left_max_bound, bottom_max_bound, right_min_bound, top_min_bound,
-                                                                            self.file_path_out_base + '_veg_height.tif', self.file_path_out_base + '_veg_height_common_extent.tif -overwrite')
+                run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
+                (left_max_bound, bottom_max_bound, right_min_bound, \
+                top_min_bound, self.file_path_dataset2, file_name_date2_te) \
+                + ' -overwrite'
+            else:
+                # if date1 and date2 are the same extents, don't waste time
+                # just copy
+                run_arg1 = 'cp {} {}'.format(self.file_path_dataset1,
+                            file_name_date1_te)
+                run_arg2 = 'cp {} {}'.format(self.file_path_dataset2,
+                            file_name_date2_te)
 
-                    run(run_arg1, shell = True)
-                    run(run_arg2, shell = True)
-                    print('running dem_common_extent')
-                    run(run_arg4, shell = True)
-                    print('running veg_height_common_extent')
-                    run(run_arg4b, shell = True)
-                    # remove unneeded files
-                    run_arg5 = 'rm ' + self.file_path_out_base + '_dem.tif'
-                    run_arg5b = 'rm ' + self.file_path_out_base + '_veg_height.tif'
-                    run(run_arg5, shell = True)
-                    run(run_arg5b, shell = True)
-                    break
-                elif response.lower() == 'no':
-                    sys.exit("exiting program")
-                    break
-                else:
-                    print('please answer "yes" or "no"')
-        else:
-            pass
+            if topo_rez_same:
+                run_arg3 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format \
+                            (self.file_path_topo, self.file_path_out_base + '_dem.tif')
+                run(run_arg3, shell=True)
+                run_arg3b = 'gdal_translate -of GTiff NETCDF:"{0}":veg_height {1}' \
+                            .format(self.file_path_topo, self.file_path_out_base +
+                            '_veg_height.tif')
+                run(run_arg3b, shell=True)
+            else:
+                print(('the resolution of your topo.nc file differs from repeat '
+                '\narraysIt will be resized to fit the resolution repeat arrays.'
+                '\n Your input file will NOT be changed{0}\n').format('--'*60))
 
-        #open newly created clipped tifs for use in further analyses
-        with rio.open(file_name_dataset1_te) as src:
-            d1_te = src
-            self.meta = d1_te.profile  # just need one meta data file because it's the same for both
-            mat_clip1 = d1_te.read()  #matrix
-            mat_clip1 = mat_clip1[0]
-            self.mat_clip1_orig = mat_clip1
-            mat_clip1[np.isnan(mat_clip1)] = -9999
-        with rio.open(file_name_dataset2_te) as src:
-            d2_te = src
-            mat_clip2 = d2_te.read()  #matrix
-            mat_clip2 = mat_clip2[0]
-            self.mat_clip2_orig = mat_clip2
-            mat_clip2[np.isnan(mat_clip2)] = -9999
-        with rio.open(self.file_path_out_base + '_dem_common_extent.tif') as src:
-            topo_te = src
-            dem_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
-            dem_clip = dem_clip[0]
-            dem_clip[np.isnan(dem_clip)] = -9999
-            self.dem_clip = dem_clip
-            # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
-            self.check_DEM_resolution()
+                run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}' \
+                            .format(round(rez), self.file_path_topo, \
+                            self.file_path_out_base + '_dem.tif')
 
-        self.mat_clip1 = self.get16bit(mat_clip1)
-        self.mat_clip2 = self.get16bit(mat_clip2)
+                run(run_arg3, shell=True)
+                run_arg3b = 'gdal_translate -of GTiff -tr {0} {0} NETCDF: \
+                            "{1}":veg_height {2}'.format(round(rez),
+                            self.file_path_topo, self.file_path_out_base
+                            + '_veg_height.tif')
+                run(run_arg3b, shell=True)
+
+            run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
+                        (left_max_bound, bottom_max_bound, right_min_bound, \
+                        top_min_bound, self.file_path_out_base + '_dem.tif', \
+                        self.file_path_out_base + '_dem_common_extent.tif -overwrite')
+
+            run_arg4b = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format( \
+                        left_max_bound, bottom_max_bound, right_min_bound, \
+                        top_min_bound, self.file_path_out_base + '_veg_height.tif', \
+                        self.file_path_out_base + '_veg_height_common_extent.tif -overwrite')
+
+            run(run_arg1, shell = True)
+            run(run_arg2, shell = True)
+            run(run_arg4, shell = True)
+            run(run_arg4b, shell = True)
+
+            # remove unneeded files
+            run_arg5 = 'rm ' + self.file_path_out_base + '_dem.tif'
+            run_arg5b = 'rm ' + self.file_path_out_base + '_veg_height.tif'
+            run(run_arg5, shell = True)
+            run(run_arg5b, shell = True)
+
+        # #open newly created clipped tifs for use in further analyses
+        # with rio.open(file_name_date1_te) as src:
+        #     d1_te = src
+        #     self.meta = d1_te.profile  # just need one meta data file because it's the same for both
+        #     mat_clip1 = d1_te.read()  #matrix
+        #     mat_clip1 = mat_clip1[0]
+        #     self.mat_clip1_orig = mat_clip1
+        #     mat_clip1[np.isnan(mat_clip1)] = -9999
+        # with rio.open(file_name_date2_te) as src:
+        #     self.d2_te = src
+        #     # meta2_te = self.d2_te.profile()
+        #     mat_clip2 = self.d2_te.read()  #matrix
+        #     mat_clip2 = mat_clip2[0]
+        #     self.mat_clip2_orig = mat_clip2
+        #     mat_clip2[np.isnan(mat_clip2)] = -9999
+        # with rio.open(self.file_path_out_base + '_dem_common_extent.tif') as src:
+        #     topo_te = src
+        #     dem_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
+        #     dem_clip = dem_clip[0]
+        #     dem_clip[np.isnan(dem_clip)] = -9999
+        #     self.dem_clip = dem_clip
+        #     # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
+        #     self.check_DEM_resolution()
+        #
+        # self.mat_clip1 = self.get16bit(mat_clip1)
+        # self.mat_clip2 = self.get16bit(mat_clip2)
+
+        self.file_name_date1_clipped = file_name_date1_te
+        self.file_name_date2_clipped = file_name_date2_te
+        self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
 
     # @profile
     def mask_basic(self):
@@ -350,15 +407,42 @@ class MultiArrayOverlap(object):
         mat_diff:       matrix - date1 depth - date2 depth
         mat_diff_norm:  matrix - mat_diff / date1
         """
-        mat_clip1 = self.mat_clip1.copy()
-        mat_clip2 = self.mat_clip2.copy()
-        self.all_loss = (np.absolute(mat_clip1) > 0) & (np.absolute(self.mat_clip2) == 0)  #all loss minimal
+        with rio.open(self.file_name_date1_clipped) as src:
+            d1_te = src
+            self.meta = d1_te.profile  # just need one meta data file because it's the same for both
+            mat_clip1 = d1_te.read()  #matrix
+            mat_clip1 = mat_clip1[0]
+            self.mat_clip1_orig = mat_clip1
+            mat_clip1[np.isnan(mat_clip1)] = -9999
+            mat_clip1 = self.get16bit(mat_clip1)
+        with rio.open(self.file_name_date2_clipped) as src:
+            self.d2_te = src
+            # meta2_te = self.d2_te.profile()
+            mat_clip2 = self.d2_te.read()  #matrix
+            mat_clip2 = mat_clip2[0]
+            self.mat_clip2_orig = mat_clip2
+            mat_clip2[np.isnan(mat_clip2)] = -9999
+            mat_clip2 = self.get16bit(mat_clip2)
+        with rio.open(self.file_name_dem) as src:
+            topo_te = src
+            dem_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
+            dem_clip = dem_clip[0]
+            dem_clip[np.isnan(dem_clip)] = -9999
+            self.dem_clip = dem_clip
+            # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
+            self.check_DEM_resolution()
+
+        self.all_loss = (np.absolute(mat_clip1) > 0) & (np.absolute(mat_clip2) == 0)  #all loss minimal
         mat_diff = mat_clip2 - mat_clip1  # raw difference
         # self.self.all_loss = (np.absolute(self.mat_clip1).round(2) > 0.0) & (np.absolute(self.mat_clip2).round(2)==0.0)  #all loss minimal
         mat_clip1[~self.all_loss & (mat_clip1 < 25)] = 25  # Set snow depths below 0.25m to 0.25m to avoid dividing by zero
         mat_diff_norm = np.round((mat_diff / mat_clip1), 2)  #
         self.mat_diff_norm = np.ndarray.astype(mat_diff_norm, np.float16)
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
+
+        self.mat_clip1 = mat_clip2
+        self.mat_clip2 = mat_clip2
+
 
     def trim_extent_nan(self, name):
         """Used to trim path and rows from array edges with na values.
@@ -401,6 +485,34 @@ class MultiArrayOverlap(object):
             self.mask_overlap_nan_trim = self.mask_overlap_nan[idc[0]:idc[1],idc[2]:idc[3]]  # overlap boolean trimmed to nan_extent
         return mat_trimmed_nan
     # @profile
+    def determine_if_extents_changed(self):
+        """
+        A check of if clipped files were actually clipped
+        """
+        print('d2', self.d2)
+        if not rio.coords.disjoint_bounds(self.d2.bounds, self.d2_te.bounds):
+            self.disjoint_bounds = False
+        else:
+            self.disjoint_bounds = True
+
+            bounds_date2 = []
+            bounds_date2[0], bounds_date2[1] = self.d2.bounds.left, self.d2.bounds.right
+            bounds_date2[2], bounds_date2[3] = self.d2.bounds.upper, self.d2.bounds.lower
+
+            bounds_date2_te = []
+            bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, d2_te.bounds.right
+            bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.top, self.d2_te.bounds.lower
+
+            buffer=[]
+            # Notice '*-1'.  Those ensure subsetting flag array into nan array
+            # buffers -<buffer> on right and bottom, and +<buffer> top and left
+            buffer[0] = round((bounds_date2[0] - bounds_date2_te[0]) / rez) * -1
+            buffer[3] = round((bounds_date2[3] - bounds_date2_te[3]) / rez)
+            buffer[1] = round((bounds_date2[1] - bounds_date2_te[1]) / rez) * -1
+            buffer[2] = round((bounds_date2[2] - bounds_date2_te[2]) / rez)
+            buffer[buffer==0] = None
+            self.buffer = buffer
+            print(buffer)
     def save_tiff(self, fname, flags, include_arrays, include_masks):
         """
         Saves up to two geotiffs using RasterIO basically.  One tiff will be the
@@ -459,15 +571,30 @@ class MultiArrayOverlap(object):
         # finally, change abbreviated object names to verbose, intuitive names
         band_names = self.apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
         # update metadata to reflect new band count
-        print(self.meta)
-        self.meta.update({
+
+        # Ensure output flags tiff is in original, pre-clipped date2 shape
+        if not self.already_clipped:
+            self.determine_if_extents_changed()
+
+        if self.disjoint_bounds:
+            #buffer all points
+            #nan array (uint8 255) with date2 pre-clipped shape
+            flag_array = np.full(self.d2.shape, 255, dtype = 'uint8')
+            for id, band in enumerate(flag_names):
+                mat_temp = getattr(self, band)
+                flag_array[top_buffer : bottom_buffer, left_buffer : right_buffer] = mat_temp
+                setattr(self, band, mat_temp)
+
+
+        print(self.meta2)
+        self.meta2.update({
             'count': len(flag_names),
             'dtype': 'uint8',
             'nodata': 255})
 
         # Write new file
-        print(self.meta)
-        with rio.open(self.file_path_out_tif_flags, 'w', **self.meta) as dst:
+        print(self.meta2)
+        with rio.open(self.file_path_out_tif_flags, 'w', **self.meta2) as dst:
             for id, band in enumerate(flag_names, start = 1):
                 try:
                     dst.write_band(id, getattr(self, flag_names[id - 1]))
@@ -485,12 +612,12 @@ class MultiArrayOverlap(object):
         # finally, change abbreviated object names to verbose, intuitive names
         band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
         # update metadata to reflect new band count
-        self.meta.update({
+        self.meta2.update({
             'count': len(array_names),
             'dtype': 'float32',
             'nodata': -9999})
 
-        with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta) as dst:
+        with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2) as dst:
             for id, band in enumerate(array_names, start = 1):
                 try:
                     dst.write_band(id, getattr(self, array_names[id - 1]))
