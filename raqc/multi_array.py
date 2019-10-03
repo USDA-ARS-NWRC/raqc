@@ -9,10 +9,13 @@ from subprocess import run
 from netCDF4 import Dataset
 import time
 import pandas as pd
+import json
+import affine
 from memory_profiler import profile
 
 class MultiArrayOverlap(object):
-    def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, basin, file_name_modifier, elevation_band_resolution):
+    def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
+                file_out_root, basin, file_name_modifier, elevation_band_resolution):
         """
         Initiate self and add attributes needed throughout RAQC run.
         Ensure dates are in chronological order.
@@ -24,13 +27,16 @@ class MultiArrayOverlap(object):
         # Ensure that dataset 1 and dataset2 are in chronological order
         self.date1_string = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
         self.date2_string = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
-        check_chronology1 = pd.to_datetime(file_path_dataset1.split('/')[-1].split('_')[0][-8:], format = '%Y%m%d')
-        check_chronology2 = pd.to_datetime(file_path_dataset2.split('/')[-1].split('_')[0][-8:], format = '%Y%m%d')
+        check_chronology1 = pd.to_datetime(file_path_dataset1.split('/')[-1]  \
+                            .split('_')[0][-8:], format = '%Y%m%d')
+        check_chronology2 = pd.to_datetime(file_path_dataset2.split('/')[-1] \
+                            .split('_')[0][-8:], format = '%Y%m%d')
 
         if check_chronology1 < check_chronology2:
             pass
         else:
-            sys.exit("Date 1 must occur before Date 2. Please switch Date 1 with Date 2 in UserConfit. Exiting program")
+            sys.exit("Date 1 must occur before Date 2. Please switch Date 1 \
+                        with Date 2 in UserConfit. Exiting program")
 
         # Make subdirectory --> file_out_root/basin
         file_out_basin = os.path.join(file_out_root, basin)
@@ -47,13 +53,14 @@ class MultiArrayOverlap(object):
         self.file_path_out_backup_config = '{0}_{1}'.format(self.file_path_out_base, 'raqc_backup_config.ini')
         self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_path_out_base)
         self.elevation_band_resolution = elevation_band_resolution
+        self.file_path_out_json = '{0}_metadata.txt'.format(self.file_path_out_base)
         path_log_file = '{0}_memory_usage.log'.format(self.file_path_out_base)
         # log_file = open(path_log_file, 'w+')
 
         # check if user decided to pass clipped files in config file
         # Note: NOT ROBUST for user input error!
         # i.e. if wrong basin ([file][basin]) in UserConfig, problems will emerge
-        string_match = 'to'
+        string_match = 'clipped_to'
         # this will yield 0, 1 or 2, coding for which files were passed
         check_for_clipped =  (string_match in file_path_dataset1) + \
                                 (string_match in file_path_dataset2)
@@ -79,42 +86,17 @@ class MultiArrayOverlap(object):
                 sys.exit('Exiting ---- Ensure all clipped files present or simply'
                 '\npass original snow depth and topo files\n')
             else:
-                pass
-
-        #
+                self.file_path_date1_clipped = file_path_dataset1
+                self.file_path_date2_clipped = file_path_dataset2
+                self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
+                # self.file_name_veg = self.file_path_out_base + '_veg_common_extent.tif'
+                        #
         if not self.already_clipped:
             self.file_path_dataset1 = file_path_dataset1
             self.file_path_dataset2 = file_path_dataset2
             self.file_path_topo = file_path_topo
             self.file_out_basin = file_out_basin
 
-        # #Grab arrays and spatial metadata
-        # if self.already_clipped:
-            # with rio.open(file_path_dataset1) as src:
-            #     d1 = src
-            #     mat_clip1 = d1.read()  #matrix
-            #     mat_clip1 = mat_clip1[0]
-            #     mat_clip1[np.isnan(mat_clip1)] = -9999
-            #     self.mat_clip1 = self.get16bit(mat_clip1)
-            # with rio.open(file_path_dataset2) as src:
-            #     d2 = src
-            #     self.meta2 = d2.profile
-            #     mat_clip2 = d2.read()  #matrix
-            #     mat_clip2 = mat_clip2[0]
-            #     mat_clip2[np.isnan(mat_clip2)] = -9999
-            #     self.mat_clip2 = self.get16bit(mat_clip2)
-            # with rio.open(file_path_dem) as src:
-            #     topo = src
-            #     dem_clip = topo.read()
-            #     dem_clip = dem_clip[0]
-            #     dem_clip[np.isnan(dem_clip)] = -9999
-            #     self.dem_clip = dem_clip
-            #     # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
-            #     self.check_DEM_resolution()
-
-        self.file_name_date1_clipped = file_path_dataset1
-        self.file_name_date2_clipped = file_path_dataset2
-        self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
 
     # @profile
     def clip_extent_overlap(self, remove_clipped_files):
@@ -131,9 +113,11 @@ class MultiArrayOverlap(object):
         with rio.open(self.file_path_dataset2) as src:
             d2 = src
             self.meta2 = d2.profile
+            self.d2 = d2
 
         #grab basics
         rez = meta['transform'][0]  # spatial resolution
+        self.rez = rez
         rez2 = self.meta2['transform'][0]
 
         #find topo file info
@@ -142,7 +126,7 @@ class MultiArrayOverlap(object):
         y = topo.variables['y'][:]
         rez3 = x[1] - x[0]
         topo_extents = [None] * 4
-        topo_extents[0], topo_extents[1], topo_extents[2], topo_extents[3], = \
+        topo_extents[0], topo_extents[1], topo_extents[2], topo_extents[3] = \
             x.min(), y.min(), x.max(), y.max()
 
         # check that resolutions are the same.  Note: if rez not a whole number,
@@ -157,26 +141,52 @@ class MultiArrayOverlap(object):
         else:
             topo_rez_same = False
 
+        self.extents_same = rio.coords.disjoint_bounds(d2.bounds, d1.bounds)
+
+        # save metadata of original date2 to json txt file
+        with open(self.file_path_out_json, 'w') as outfile:
+            json_dict = dict({k:v for k, v in self.meta2.items() if k != 'crs'})
+            # convert crs to integer, as crs object is not "serializable" for
+            # saving with json.dump
+            # will be reincarnated as object using epsg code later
+            crs_object = rio.crs.CRS.to_epsg(self.meta2['crs'])
+            json_dict.update({'crs' : crs_object})
+            json.dump(json_dict, outfile)
+
 
         # grab bounds of common/overlapping extent and prepare function call for
         # gdal to clip to extent and align
         left_max_bound = max(d1.bounds.left, d2.bounds.left, topo_extents[0])
-        bottom_max_bound = max(d1.bounds.bottom, d2.bounds.bottom, topo_extents[1])
+        bottom_max_bound = max(d1.bounds.bottom, d2.bounds.bottom, topo_# Why are files clipped so far?
+file_path_in_date1 =  '/mnt/snowpack/lidar/SanJoaquin/2019/USCASJ20190614_SUPERsnow_depth_50p0m_agg.tif'
+file_path_in_date2 =  '/mnt/snowpack/lidar/SanJoaquin/2019/USCASJ20190704_SUPERsnow_depth_50p0m_agg_merged.tif'
+
+with rio.open(file_path_in_date1) as src:
+    d1 = src
+    meta = d1.profile
+
+with rio.open(file_path_in_date2) as src:
+    d2 = src
+    meta2 = d2.profileextents[1])
         right_min_bound =  min(d1.bounds.right, d2.bounds.right, topo_extents[2])
         top_min_bound = min(d1.bounds.top, d2.bounds.top, topo_extents[3])
-        self.d1, self.d2 = d1, d2
 
         # ensure nothing after decimal - nice whole number, admittedly a float
-        left_max_bound = left_max_bound - (left_max_bound % round(rez))
-        bottom_max_bound = bottom_max_bound + (round(rez) - bottom_max_bound % round(rez))
-        right_min_bound = right_min_bound - (right_min_bound % round(rez))
-        top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
+        # left_max_bound = left_max_bound - (left_max_bound % round(rez))
+        left_max_bound = self.increment_extents(left_max_bound, rez2, 'up')
+        # bottom_max_bound = bottom_max_bound + (round(rez) - bottom_max_bound % round(rez))
+        bottom_max_bound = self.increment_extents(bottom_max_bound, rez2, 'up')
+        # right_min_bound = right_min_bound - (right_min_bound % round(rez))
+        right_min_bound = self.increment_extents(right_min_bound, rez2, 'down')
+        # top_min_bound = top_min_bound + (round(rez) - top_min_bound % round(rez))
+        top_min_bound = self.increment_extents(top_min_bound, rez2, 'down')
 
-        # determine if extents of snow files are the same
-        extents_same =  (d1.bounds.left == d2.bounds.left) & \
-                        (d1.bounds.bottom == d2.bounds.bottom) & \
-                        (d1.bounds.right == d2.bounds.right) & \
-                        (d1.bounds.top == d2.bounds.top)
+        print('Cols, ', (right_min_bound - left_max_bound) / round(rez2))
+        print('rows, ', (top_min_bound - bottom_max_bound) / round(rez2))
+        print(left_max_bound, right_min_bound, top_min_bound, bottom_max_bound)
+
+        print('old fashioned wasy', self.extents_same)
+        print('easier way', rio.coords.disjoint_bounds(d2.bounds, d1.bounds))
 
         # Create file paths and names
         file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
@@ -193,120 +203,108 @@ class MultiArrayOverlap(object):
                                     (file_name_date2_te_temp)[0][:id_date_start + 8]
         file_name_date2_te_second = os.path.splitext \
                                     (file_name_date2_te_temp)[0][id_date_start:]
-        file_name_date1_te = os.path.join(self.file_out_basin, \
-                                            file_name_date1_te_first + '_to_' + \
+        file_path_date1_te = os.path.join(self.file_out_basin, \
+                                            file_name_date1_te_first + '_clipped_to_' + \
                                             file_name_date2_te_second + '.tif')
-        file_name_date2_te = os.path.join(self.file_out_basin, \
-                                            file_name_date2_te_first + '_to_' +  \
+        file_path_date2_te = os.path.join(self.file_out_basin, \
+                                            file_name_date2_te_first + '_clipped_to_' +  \
                                             file_name_date1_te_second + '.tif')
 
         # list of clipped files that are created in below code, and deleted upon user specification in UserConfig
         # the deleting of files was moved towards end of code to free up memory
         self.remove_clipped_files = remove_clipped_files
-        self.new_file_list = [file_name_date1_te, file_name_date2_te, \
+        self.new_file_list = [file_path_date1_te, file_path_date2_te, \
                             self.file_path_out_base + '_dem_common_extent.tif', \
                             self.file_path_out_base + '_veg_height_common_extent.tif']
-                #Check if file already exists
-
-        if not (os.path.exists(file_name_date1_te)) & \
-                (os.path.exists(file_name_date2_te) & \
-                (os.path.exists(self.file_path_out_base + '_dem_common_extent.tif'))):
-
-            # START Clipping
-            if not extents_same:
-                # if date1 and date2 have different extents  ---> clip
-                run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                (left_max_bound, bottom_max_bound, right_min_bound, top_min_bound, \
-                self.file_path_dataset1, file_name_date1_te) + ' -overwrite'
 
 
-                run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                (left_max_bound, bottom_max_bound, right_min_bound, \
-                top_min_bound, self.file_path_dataset2, file_name_date2_te) \
-                + ' -overwrite'
-            else:
-                # if date1 and date2 are the same extents, don't waste time
-                # just copy
-                run_arg1 = 'cp {} {}'.format(self.file_path_dataset1,
-                            file_name_date1_te)
-                run_arg2 = 'cp {} {}'.format(self.file_path_dataset2,
-                            file_name_date2_te)
+        # #Check if files already exists
+        # if not (os.path.exists(file_path_date1_te)) & \
+        #         (os.path.exists(file_path_date2_te) & \
+        #         (os.path.exists(self.file_path_out_base + '_dem_common_extent.tif'))):
 
-            if topo_rez_same:
-                run_arg3 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format \
-                            (self.file_path_topo, self.file_path_out_base + '_dem.tif')
-                run(run_arg3, shell=True)
-                run_arg3b = 'gdal_translate -of GTiff NETCDF:"{0}":veg_height {1}' \
-                            .format(self.file_path_topo, self.file_path_out_base +
-                            '_veg_height.tif')
-                run(run_arg3b, shell=True)
-            else:
-                print(('the resolution of your topo.nc file differs from repeat '
-                '\narraysIt will be resized to fit the resolution repeat arrays.'
-                '\n Your input file will NOT be changed{0}\n').format('--'*60))
+        # START Clipping
+        if not self.extents_same:
+            # if date1 and date2 have different extents  ---> clip
+            run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
+            (left_max_bound, bottom_max_bound, right_min_bound, top_min_bound, \
+            self.file_path_dataset1, file_path_date1_te) + ' -overwrite'
 
-                run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}' \
-                            .format(round(rez), self.file_path_topo, \
-                            self.file_path_out_base + '_dem.tif')
 
-                run(run_arg3, shell=True)
-                run_arg3b = 'gdal_translate -of GTiff -tr {0} {0} NETCDF: \
-                            "{1}":veg_height {2}'.format(round(rez),
-                            self.file_path_topo, self.file_path_out_base
-                            + '_veg_height.tif')
-                run(run_arg3b, shell=True)
+            run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
+            (left_max_bound, bottom_max_bound, right_min_bound, \
+            top_min_bound, self.file_path_dataset2, file_path_date2_te) \
+            + ' -overwrite'
+        else:
+            # if date1 and date2 are the same extents, don't waste time
+            # just copy
+            print('Note: the extents of date1 and date2 were the same and \
+            Did NOT need clipping.  File copied and renamed as clipped \
+            but is the same')
 
-            run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                        (left_max_bound, bottom_max_bound, right_min_bound, \
-                        top_min_bound, self.file_path_out_base + '_dem.tif', \
-                        self.file_path_out_base + '_dem_common_extent.tif -overwrite')
+            pass
 
-            run_arg4b = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format( \
-                        left_max_bound, bottom_max_bound, right_min_bound, \
-                        top_min_bound, self.file_path_out_base + '_veg_height.tif', \
-                        self.file_path_out_base + '_veg_height_common_extent.tif -overwrite')
+            # run_arg1 = 'cp {} {}'.format(self.file_path_dataset1,
+            #             file_path_date1_te)
+            # run_arg2 = 'cp {} {}'.format(self.file_path_dataset2,
+            #             file_path_date2_te)
 
-            run(run_arg1, shell = True)
-            run(run_arg2, shell = True)
-            run(run_arg4, shell = True)
-            run(run_arg4b, shell = True)
+        # If spatial resolution of DEM differs from snow ---> rescale
+        if topo_rez_same:
+            run_arg3 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format \
+                        (self.file_path_topo, self.file_path_out_base + '_dem.tif')
+            run(run_arg3, shell=True)
+            run_arg3b = 'gdal_translate -of GTiff NETCDF:"{0}":veg_height {1}' \
+                        .format(self.file_path_topo, self.file_path_out_base +
+                        '_veg_height.tif')
+            run(run_arg3b, shell=True)
 
-            # remove unneeded files
-            run_arg5 = 'rm ' + self.file_path_out_base + '_dem.tif'
-            run_arg5b = 'rm ' + self.file_path_out_base + '_veg_height.tif'
-            run(run_arg5, shell = True)
-            run(run_arg5b, shell = True)
+        else:
+            print(('the resolution of your topo.nc file differs from repeat '
+            '\narraysIt will be resized to fit the resolution repeat arrays.'
+            '\n Your input file will NOT be changed{0}\n').format('--'*60))
 
-        # #open newly created clipped tifs for use in further analyses
-        # with rio.open(file_name_date1_te) as src:
-        #     d1_te = src
-        #     self.meta = d1_te.profile  # just need one meta data file because it's the same for both
-        #     mat_clip1 = d1_te.read()  #matrix
-        #     mat_clip1 = mat_clip1[0]
-        #     self.mat_clip1_orig = mat_clip1
-        #     mat_clip1[np.isnan(mat_clip1)] = -9999
-        # with rio.open(file_name_date2_te) as src:
-        #     self.d2_te = src
-        #     # meta2_te = self.d2_te.profile()
-        #     mat_clip2 = self.d2_te.read()  #matrix
-        #     mat_clip2 = mat_clip2[0]
-        #     self.mat_clip2_orig = mat_clip2
-        #     mat_clip2[np.isnan(mat_clip2)] = -9999
-        # with rio.open(self.file_path_out_base + '_dem_common_extent.tif') as src:
-        #     topo_te = src
-        #     dem_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
-        #     dem_clip = dem_clip[0]
-        #     dem_clip[np.isnan(dem_clip)] = -9999
-        #     self.dem_clip = dem_clip
-        #     # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
-        #     self.check_DEM_resolution()
-        #
-        # self.mat_clip1 = self.get16bit(mat_clip1)
-        # self.mat_clip2 = self.get16bit(mat_clip2)
+            run_arg3 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}' \
+                        .format(round(rez), self.file_path_topo, \
+                        self.file_path_out_base + '_dem.tif')
 
-        self.file_name_date1_clipped = file_name_date1_te
-        self.file_name_date2_clipped = file_name_date2_te
-        self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
+            run(run_arg3, shell=True)
+            run_arg3b = 'gdal_translate -of GTiff -tr {0} {0} NE(bounds_date2[0] - bounds_date2_te[0]) / rezTCDF: \
+                        "{1}":veg_height {2}'.format(round(rez),
+                        self.file_path_topo, self.file_path_out_base
+                        + '_veg_height.tif')
+            run(run_arg3b, shell=True)
+
+        run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
+                    (left_max_bound, bottom_max_bound, right_min_bound, \
+                    top_min_bound, self.file_path_out_base + '_dem.tif', \
+                    self.file_path_out_base + '_dem_common_extent.tif -overwrite')
+
+        run_arg4b = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format( \
+                    left_max_bound, bottom_max_bound, right_min_bound, \
+                    top_min_bound, self.file_path_out_base + '_veg_height.tif', \
+                    self.file_path_out_base + '_veg_height_common_extent.tif -overwrite')
+
+        run(run_arg1, shell = True)
+        run(run_arg2, shell = True)
+        run(run_arg4, shell = True)
+        run(run_arg4b, shell = True)
+
+        # remove unneeded files
+        run_arg5 = 'rm ' + self.file_path_out_base + '_dem.tif'
+        run_arg5b = 'rm ' + self.file_path_out_base + '_veg_height.tif'
+        run(run_arg5, shell = True)
+        run(run_arg5b, shell = True)
+
+        if not self.extents_same:
+            self.file_path_date1_clipped = file_path_date1_te
+            self.file_path_date2_clipped = file_path_date2_te
+            self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
+        # if not clipped, use original file
+        else:
+            self.file_path_date1_clipped = self.file_path_date1
+            self.file_path_date2_clipped = self.file_path_date2
+            self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
 
     # @profile
     def mask_basic(self):
@@ -407,28 +405,27 @@ class MultiArrayOverlap(object):
         mat_diff:       matrix - date1 depth - date2 depth
         mat_diff_norm:  matrix - mat_diff / date1
         """
-        with rio.open(self.file_name_date1_clipped) as src:
+        with rio.open(self.file_path_date1_clipped) as src:
             d1_te = src
-            self.meta = d1_te.profile  # just need one meta data file because it's the same for both
             mat_clip1 = d1_te.read()  #matrix
             mat_clip1 = mat_clip1[0]
-            self.mat_clip1_orig = mat_clip1
             mat_clip1[np.isnan(mat_clip1)] = -9999
             mat_clip1 = self.get16bit(mat_clip1)
-        with rio.open(self.file_name_date2_clipped) as src:
+            self.mat_clip1 = mat_clip1.copy()
+        with rio.open(self.file_path_date2_clipped) as src:
             self.d2_te = src
-            # meta2_te = self.d2_te.profile()
+            self.meta2_te = self.d2_te.profile
             mat_clip2 = self.d2_te.read()  #matrix
             mat_clip2 = mat_clip2[0]
-            self.mat_clip2_orig = mat_clip2
             mat_clip2[np.isnan(mat_clip2)] = -9999
             mat_clip2 = self.get16bit(mat_clip2)
+            self.mat_clip2 = mat_clip2.copy()
         with rio.open(self.file_name_dem) as src:
             topo_te = src
             dem_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
             dem_clip = dem_clip[0]
             dem_clip[np.isnan(dem_clip)] = -9999
-            self.dem_clip = dem_clip
+            self.dem_clip = dem_clip.copy()
             # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
             self.check_DEM_resolution()
 
@@ -440,9 +437,317 @@ class MultiArrayOverlap(object):
         self.mat_diff_norm = np.ndarray.astype(mat_diff_norm, np.float16)
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
 
-        self.mat_clip1 = mat_clip2
-        self.mat_clip2 = mat_clip2
+    # @profile
+    def determine_if_extents_changed(self):
+        """
+        A check of if clipped files were actually clipped
+        """
 
+        # get extents and resolution from json and determine if originally clipped
+        d_orig = self.derive_dataset('d2_te')
+
+        # determine if "clipped" version was actually clipped i.e. diff extents
+        if not self.extents_same:
+            #was clipped
+            self.disjoint_bounds = True
+        else:
+            # did not need clipping
+            self.disjoint_bounds = False
+
+        #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
+        if self.disjoint_bounds:
+            bounds_date2_te = [None] * 4
+            bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, self.d2_te.bounds.bottom
+            bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.right, self.d2_te.bounds.top
+
+            if self.already_clipped:
+                rez = d_orig['resolution']
+                bounds_date2 = [None] * 4
+                bounds_date2[0] = self.increment_extents(d_orig['left'], rez, 'up')
+                bounds_date2[1] = self.increment_extents(d_orig['bottom'], rez, 'up')
+                bounds_date2[2] = self.increment_extents(d_orig['right'], rez, 'down')
+                bounds_date2[3] = self.increment_extents(d_orig['top'], rez, 'down')
+                rez = d_orig['resolution']
+            else:
+                bounds_date2 = [None] * 4
+                bounds_date2[0] = self.increment_extents(self.d2.bounds.left, self.rez, 'up')
+                bounds_date2[1] = self.increment_extents(self.d2.bounds.bottom, self.rez, 'up')
+                bounds_date2[2] = self.increment_extents(self.d2.bounds.right, self.rez, 'down')
+                bounds_date2[3] = self.increment_extents(self.d2.bounds.top, self.rez, 'down')
+                rez = self.rez
+            buffer={}
+            # Notice '*-1'.  Those ensure subsetting flag array into nan array
+            # buffers -<buffer> on right and bottom, and +<buffer> top and left
+            buffer.update({'left' : round((bounds_date2[0] - bounds_date2_te[0]) / rez) * -1})
+            buffer.update({'bottom' : round((bounds_date2[1] - bounds_date2_te[1]) / rez)})
+            buffer.update({'right' : round((bounds_date2[2] - bounds_date2_te[2]) / rez) * -1})
+            buffer.update({'top' : round((bounds_date2[3] - bounds_date2_te[3]) / rez)})
+            buffer[buffer==0] = None
+            for k, v in buffer.items():
+                if v == 0:
+                    buffer[k] = None
+            self.buffer = buffer
+            print(buffer)
+    def save_tiff(self, fname, flags, include_arrays, include_masks):
+        """
+        Saves up to two geotiffs using RasterIO basically.  One tiff will be the
+        matrices of floats, and the second the masks and flags - booleans (uint8).
+        Bands to output will be specified in UserConfig
+
+        Args:
+            fname: filename including path of where to save
+            flags: string. flags to include as bands in tif
+            include_arrays: arrays (i.e. difference) to include as bands in tif
+            include_masks: arrays (i.e. overlap_nan) to include as bands in tif
+
+        Outputs:
+            file_path_out_tiff_flags:   single or multibanded array which may
+                                        include any flag or mask
+            file_path_out_tiff_arrays:  single or multibanded array which may
+                                        include mat_diff and snow depth matrices
+                                        for example
+        """
+
+        tick = time.clock()
+        # now that calculations complete (i.e. self.mat_diff > 1), set -9999 to nan
+        self.mat_diff[~self.mask_nan_snow_present] = np.nan
+        self.mat_diff_norm[~self.mask_nan_snow_present] = np.nan
+        self.mat_clip1 = np.ndarray.astype(self.mat_clip1, np.float32)
+        self.mat_clip2 = np.ndarray.astype(self.mat_clip2, np.float32)
+        self.mat_clip1[self.mat_clip1 == -9999] = np.nan
+        self.mat_clip2[self.mat_clip2 == -9999] = np.nan
+        # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
+        self.mask_overlap_nan = ~self.mask_overlap_nan
+
+    # PREPARE bands to be saved to tif
+    # for config parsimony, user selected 'basin_block' 'elevation_block' and/or 'tree'
+    # which initiates 'loss' and 'gain' flags for each.
+    # Below code simply parses the three user config values into
+    # 'loss' and 'gain' for each and saves as flags names for output.
+        flag_names = []
+        for flag in flags:
+            if flag not in ['basin_block', 'elevation_block', 'tree']:
+                flag_names.append('flag_' + flag)
+                # flagged = getattr(self, flag_flags[i])
+            else:
+                if flag in ['basin_block']:
+                    flag_names.extend(('flag_basin_loss', 'flag_basin_gain'))
+                elif flag in ['elevation_block']:
+                    flag_names.extend(('flag_elevation_loss', 'flag_elevation_gain'))
+                elif flag in ['tree']:
+                    flag_names.extend(('flag_tree_loss', 'flag_tree_gain'))
+
+        # append masks to flags list to save to tiff
+        if include_masks != None:
+            for mask in include_masks:
+                flag_names.append('mask_' + mask)
+
+        # finally, change abbreviated object names to verbose, intuitive names
+        band_names = self.apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
+
+        # determine if clipping occured
+        self.determine_if_extents_changed()
+        if self.disjoint_bounds:
+            buffer = self.buffer
+            # buffer flag arrays with nans to fit original date2 array shape
+            # nan = <uint> 255
+            for id, band in enumerate(flag_names):
+                flag_buffer = np.full(self.orig_shape, 255, dtype = 'uint8')
+                mat_temp = getattr(self, band)
+                flag_buffer[buffer['top'] : buffer['bottom'], buffer['left'] : buffer['right']] = mat_temp
+                setattr(self, band, flag_buffer)
+
+            # grab json with original metadata and format some key value pairs
+            self.update_meta_from_json()
+            # update clipped metadata with that of original - extents, resolutition, etc.
+            self.meta2_te.update(self.meta_orig)
+
+        # upate metadata to include number of bands (flags) and uint8 dtype
+        self.meta2_te.update({
+            'count': len(flag_names),
+            'dtype': 'uint8',
+            'nodata': 255})
+
+        # Write new file
+        with rio.open(self.file_path_out_tif_flags, 'w', **self.meta2_te) as dst:
+            for id, band in enumerate(flag_names, start = 1):
+                try:
+                    dst.write_band(id, getattr(self, flag_names[id - 1]))
+                    dst.set_band_description(id, band_names[id - 1])
+                except ValueError:  # Rasterio has no float16  >> cast to float32
+                    mat_temp = getattr(self, flag_names[id - 1])
+                    dst.write_band(id, mat_temp.astype('uint8'))
+                    dst.set_band_description(id, band_names[id - 1])
+
+        array_names = []
+        if include_arrays != None:
+            for array in include_arrays:
+                print('included these arrays: ', array)
+                array_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
+
+
+            for id, band in enumerate(array_names):
+                array_buffer = np.full(self.orig_shape, -9999, dtype = 'float32')
+                mat_temp = getattr(self, band)
+                print('arrays are of dtype: ', type(mat_temp[0][0]))
+                array_buffer[buffer['top'] : buffer['bottom'], \
+                            buffer['left'] : buffer['right']] = mat_temp
+                setattr(self, band, array_buffer)
+
+        # finally, change abbreviated object names to verbose, intuitive names
+        band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
+
+        # update metadata to reflect new band count
+        self.meta2_te.update({
+            'count': len(array_names),
+            'dtype': 'float32',
+            'nodata': -9999})
+
+        with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
+            for id, band in enumerate(array_names, start = 1):
+                print(id)
+                # try:
+                #     print('which arrays: ', array_names[id - 1])
+                #     dst.write_band(id, getattr(self, array_names[id - 1]))
+                #     dst.set_band_description(id, band_names[id - 1])
+                # except ValueError:  # Rasterio has no float16  >> cast to float32
+                mat_temp = getattr(self, array_names[id - 1])
+                dst.write_band(id, mat_temp.astype('float32'))
+                dst.set_band_description(id, band_names[id - 1])
+
+        tock = time.clock()
+
+        # Now all is complete, DELETE clipped files from clip_extent_overlap()
+        # Upon user specification in UserConfig,
+        try:
+            if self.remove_clipped_files == True:
+                for file in self.new_file_list:
+                    run('rm ' + file, shell = True)
+        except AttributeError:  #occurs if user passed clipped files through config
+            pass
+
+        print('save tiff = ', round(tock - tick, 2), 'seconds')
+
+    def plot_this(self, action):
+        plot_basic(self, action)
+
+    def check_DEM_resolution(self):
+        """
+        Brief method ensuring that DEM resolution from UserConfig can be partitioned
+        into uint8 datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
+        <= 255 elevation bands based on the elevation range of topo file.
+        """
+        min_elev, max_elev = np.min(self.dem_clip), np.max(self.dem_clip)
+        num_elev_bins = math.ceil((max_elev - min_elev) / self.elevation_band_resolution)
+        min_elev_band_rez = math.ceil((max_elev - min_elev) / 254)
+        if num_elev_bins > 254:
+            print('In the interest of saving memory, please lower (make more coarse)' \
+            '\nyour elevation band resolution' \
+            '\nthe number of elevation bins must not exceed 254 ' \
+            '\ni.e. (max elevation - min elevation) / elevation band resolution must not exceed 254)' \
+            '\nEnter a new resolution ---> (Must be no finer than{0})'.format(min_elev_band_rez))
+
+            while True:
+                response = input()
+                try:
+                    response = float(response)
+                except ValueError:
+                    print('must enter a float or integer')
+                else:
+                    if response > min_elev_band_rez:
+                        self.min_elev_band_rez = response
+                        print('your new elevation_band_resolution will be: {}. Note that this will NOT be reflected on your backup_config.ini file'.format(response))
+                        break
+                    else:
+                        print('Value still too fine. Enter a new resolution ---> must be no finer than{0})'.format(min_elev_band_rez))
+
+    def get16bit(self, array):
+        """
+        Converts array into numpy 16 bit integer
+        """
+        id_nans = array == -9999
+        array_cm = np.round(array,2) * 100
+        array_cm = np.ndarray.astype(array_cm, np.int16)
+        array_cm[id_nans] = -9999
+        return(array_cm)
+
+    def apply_dict(self, original_list, dictionary, nested_key):
+        """
+        Basically translates Config file names into attribute names if necessary
+        """
+        keyed_list = []
+        for val in original_list:
+            try:
+                keyed_list.append(dictionary[nested_key][val])
+            except KeyError:
+                keyed_list.append(val)
+        return(keyed_list)
+
+    def increment_extents(self, coord, rez, up_down):
+        # coord_round = ~(coord % round(rez) == 0)
+        # if coord_round:
+        #     if up_down == 'down':
+        #         coord_updated = coord - (coord % round(rez))
+        #     elif up_down == 'up':
+        #         coord_updated = coord + (round(rez) - coord % round(rez))
+        # else:
+        #     coord_updated = coord
+
+        coord_round = ~(coord % round(rez) == 0)
+        if coord_round:
+            if (coord % rez) > 0.5 * rez:
+                coord_updated = coord + (round(rez) - (coord % round(rez)))
+            else:
+                coord_updated = coord - (coord % round(rez))
+        else:
+            coord_updated = coord
+        print('coord, ', coord)
+        print('coord_updated, ', coord_updated)
+        return(coord_updated)
+
+    def update_meta_from_json(self):
+        """
+        manually add add 'transform' key to metadata.
+        unable to retain with json.dump as it is not "serializable
+        basically pass epsg number <int> to affine.Affine and replace
+        value in metadata with output
+        """
+        with open(self.file_path_out_json) as json_file:
+            meta_orig = json.load(json_file)
+        crs_object = rio.crs.CRS.from_epsg(meta_orig['crs'])
+        transform_object = affine.Affine(*meta_orig['transform'][:6])
+        meta_orig.update({'crs' : crs_object, 'transform' : transform_object})
+        self.meta_orig = meta_orig
+
+    def derive_dataset(self, dataset_clipped_name):
+
+        dataset_orig = {}
+        with open(self.file_path_out_json) as json_file:
+            meta_orig = json.load(json_file)
+
+        temp_affine = meta_orig['transform'][:6]
+        rez = temp_affine[0]
+        left = temp_affine[2]
+        top = temp_affine[5]
+        right = left + meta_orig['width'] * rez
+        bottom = top - meta_orig['height'] * rez
+
+        # load clipped dataset
+        meta_clip = getattr(self, dataset_clipped_name)
+
+        # determine if original extents were same
+        self.exents_same = (meta_clip.bounds.left == left) & \
+                    (meta_clip.bounds.right == right) & \
+                    (meta_clip.bounds.top == top) & \
+                    (meta_clip.bounds.bottom == bottom)
+        dataset_orig.update({'left' : left, 'right' : right, 'top' : top, \
+                        'bottom' : bottom, 'resolution' : rez})
+
+        # save size of original array as tuple to get shape
+        orig_shape = []
+        orig_shape.extend([round((top - bottom)/rez), round((right - left)/rez)])
+        self.orig_shape = tuple(orig_shape)
+        return(dataset_orig)
 
     def trim_extent_nan(self, name):
         """Used to trim path and rows from array edges with na values.
@@ -484,216 +789,6 @@ class MultiArrayOverlap(object):
         if ~hasattr(self, 'mask_overlap_nan_trim'):
             self.mask_overlap_nan_trim = self.mask_overlap_nan[idc[0]:idc[1],idc[2]:idc[3]]  # overlap boolean trimmed to nan_extent
         return mat_trimmed_nan
-    # @profile
-    def determine_if_extents_changed(self):
-        """
-        A check of if clipped files were actually clipped
-        """
-        print('d2', self.d2)
-        if not rio.coords.disjoint_bounds(self.d2.bounds, self.d2_te.bounds):
-            self.disjoint_bounds = False
-        else:
-            self.disjoint_bounds = True
-
-            bounds_date2 = []
-            bounds_date2[0], bounds_date2[1] = self.d2.bounds.left, self.d2.bounds.right
-            bounds_date2[2], bounds_date2[3] = self.d2.bounds.upper, self.d2.bounds.lower
-
-            bounds_date2_te = []
-            bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, d2_te.bounds.right
-            bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.top, self.d2_te.bounds.lower
-
-            buffer=[]
-            # Notice '*-1'.  Those ensure subsetting flag array into nan array
-            # buffers -<buffer> on right and bottom, and +<buffer> top and left
-            buffer[0] = round((bounds_date2[0] - bounds_date2_te[0]) / rez) * -1
-            buffer[3] = round((bounds_date2[3] - bounds_date2_te[3]) / rez)
-            buffer[1] = round((bounds_date2[1] - bounds_date2_te[1]) / rez) * -1
-            buffer[2] = round((bounds_date2[2] - bounds_date2_te[2]) / rez)
-            buffer[buffer==0] = None
-            self.buffer = buffer
-            print(buffer)
-    def save_tiff(self, fname, flags, include_arrays, include_masks):
-        """
-        Saves up to two geotiffs using RasterIO basically.  One tiff will be the
-        matrices of floats, and the second the masks and flags - booleans (uint8).
-        Bands to output will be specified in UserConfig
-
-        Args:
-            fname: filename including path of where to save
-            flags: string. flags to include as bands in tif
-            include_arrays: arrays (i.e. difference) to include as bands in tif
-            include_masks: arrays (i.e. overlap_nan) to include as bands in tif
-
-        Outputs:
-            file_path_out_tiff_flags:   single or multibanded array which may
-                                        include any flag or mask
-            file_path_out_tiff_arrays:  single or multibanded array which may
-                                        include mat_diff and snow depth matrices
-                                        for example
-        """
-
-        tick = time.clock()
-        # now that calculations complete (i.e. self.mat_diff > 1), set -9999 to nan
-        self.mat_diff[~self.mask_nan_snow_present] = np.nan
-        self.mat_diff_norm[~self.mask_nan_snow_present] = np.nan
-        self.mat_clip1 = np.ndarray.astype(self.mat_clip1, np.float32)
-        self.mat_clip2 = np.ndarray.astype(self.mat_clip2, np.float32)
-        self.mat_clip1[self.mat_clip1 == -9999] = np.nan
-        self.mat_clip2[self.mat_clip2 == -9999] = np.nan
-        # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
-        # self.mask_overlap_nan = ~self.mask_overlap_nan
-
-    # PREPARE bands to be saved to tif
-        # split certain flags into 'loss' and 'gain'
-        flag_names = []
-        for flag in flags:
-            if flag not in ['basin_block', 'elevation_block', 'tree']:
-                flag_names.append('flag_' + flag)
-                # flagged = getattr(self, flag_flags[i])
-            else:
-                if flag in ['basin_block']:
-                    flag_names.extend(('flag_basin_loss', 'flag_basin_gain'))
-                elif flag in ['elevation_block']:
-                    flag_names.extend(('flag_elevation_loss', 'flag_elevation_gain'))
-                elif flag in ['tree']:
-                    flag_names.extend(('flag_tree_loss', 'flag_tree_gain'))
-
-        # append arrays and masks to flags list to save to tiff
-        if include_masks != None:
-            for mask in include_masks:
-                flag_names.append('mask_' + mask)
-
-        # if include_arrays != None:
-        #     for array in include_arrays:
-        #         flag_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
-
-        # finally, change abbreviated object names to verbose, intuitive names
-        band_names = self.apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
-        # update metadata to reflect new band count
-
-        # Ensure output flags tiff is in original, pre-clipped date2 shape
-        if not self.already_clipped:
-            self.determine_if_extents_changed()
-
-        if self.disjoint_bounds:
-            #buffer all points
-            #nan array (uint8 255) with date2 pre-clipped shape
-            flag_array = np.full(self.d2.shape, 255, dtype = 'uint8')
-            for id, band in enumerate(flag_names):
-                mat_temp = getattr(self, band)
-                flag_array[top_buffer : bottom_buffer, left_buffer : right_buffer] = mat_temp
-                setattr(self, band, mat_temp)
-
-
-        print(self.meta2)
-        self.meta2.update({
-            'count': len(flag_names),
-            'dtype': 'uint8',
-            'nodata': 255})
-
-        # Write new file
-        print(self.meta2)
-        with rio.open(self.file_path_out_tif_flags, 'w', **self.meta2) as dst:
-            for id, band in enumerate(flag_names, start = 1):
-                try:
-                    dst.write_band(id, getattr(self, flag_names[id - 1]))
-                    dst.set_band_description(id, band_names[id - 1])
-                except ValueError:  # Rasterio has no float16  >> cast to float32
-                    mat_temp = getattr(self, flag_names[id - 1])
-                    dst.write_band(id, mat_temp.astype('uint8'))
-                    dst.set_band_description(id, band_names[id - 1])
-
-        array_names = []
-        if include_arrays != None:
-            for array in include_arrays:
-                array_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
-
-        # finally, change abbreviated object names to verbose, intuitive names
-        band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
-        # update metadata to reflect new band count
-        self.meta2.update({
-            'count': len(array_names),
-            'dtype': 'float32',
-            'nodata': -9999})
-
-        with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2) as dst:
-            for id, band in enumerate(array_names, start = 1):
-                try:
-                    dst.write_band(id, getattr(self, array_names[id - 1]))
-                    dst.set_band_description(id, band_names[id - 1])
-                except ValueError:  # Rasterio has no float16  >> cast to float32
-                    mat_temp = getattr(self, array_names[id - 1])
-                    dst.write_band(id, mat_temp.astype('float32'))
-                    dst.set_band_description(id, band_names[id - 1])
-
-        tock = time.clock()
-
-        # Now all is complete, DELETE clipped files from clip_extent_overlap()
-        # Upon user specification in UserConfig,
-        try:
-            if self.remove_clipped_files == True:
-                for file in self.new_file_list:
-                    run('rm ' + file, shell = True)
-        except AttributeError:  #occurs if user passed clipped files through config
-            pass
-
-        print('save tiff = ', round(tock - tick, 2), 'seconds')
-
-    def plot_this(self, action):
-        plot_basic(self, action)
-
-    def check_DEM_resolution(self):
-        """
-        Brief method ensuring that DEM resolution from UserConfig can be partitioned
-        into uint8 datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
-        <= 255 elevation bands based on the elevation range of topo file.
-        """
-        min_elev, max_elev = np.min(self.dem_clip), np.max(self.dem_clip)
-        num_elev_bins = math.ceil((max_elev - min_elev) / self.elevation_band_resolution)
-        min_elev_band_rez = math.ceil((max_elev - min_elev) / 254)
-        if num_elev_bins > 254:
-            print('In the interest of saving memory, please lower (make more coarse)' \
-            'your elevation band resolution' \
-            'the number of elevation bins must not exceed 254 ' \
-            'i.e. (max elevation - min elevation) / elevation band resolution must not exceed 254)' \
-            'Enter a new resolution ---> (Must be no finer than{0})'.format(min_elev_band_rez))
-
-            while True:
-                response = input()
-                try:
-                    response = float(response)
-                except ValueError:
-                    print('must enter a float or integer')
-                else:
-                    if response > min_elev_band_rez:
-                        self.min_elev_band_rez = response
-                        print('your new elevation_band_resolution will be: {}. Note that this will NOT be reflected on your backup_config.ini file'.format(response))
-                        break
-                    else:
-                        print('Value still too fine. Enter a new resolution ---> must be no finer than{0})'.format(min_elev_band_rez))
-
-    def get16bit(self, array):
-        """
-        Converts array into numpy 16 bit integer
-        """
-        id_nans = array == -9999
-        array_cm = np.round(array,2) * 100
-        array_cm = np.ndarray.astype(array_cm, np.int16)
-        array_cm[id_nans] = -9999
-        return(array_cm)
-
-    def apply_dict(self, original_list, dictionary, nested_key):
-        """
-        Basically translates Config file names into attribute names if necessary
-        """
-        keyed_list = []
-        for val in original_list:
-            try:
-                keyed_list.append(dictionary[nested_key][val])
-            except KeyError:
-                keyed_list.append(val)
-        return(keyed_list)
 
 class PatternFilters():
     def init(self):
@@ -1125,6 +1220,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
                 # self.flag_tree_loss = (self.flag_basin_loss | self.flag_elevation_loss) & self.veg_presence
         # self.flag_tree_gain = (self.flag_basin_gain | self.flag_elevation_gain) & self.veg_presence
-    def __repr__(self):
-            return ("Main items of use are matrices clipped to each other's extent and maps of outlier flags \
-                    Also capable of saving geotiffs and figures")
+    # def __repr__()
+    # (self):
+    #         return ("Main items of use are matrices clipped to each other's extent and maps of outlier flags \
+    #                 Also capable of saving geotiffs and figures")
