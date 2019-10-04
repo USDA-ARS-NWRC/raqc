@@ -114,7 +114,7 @@ def main():
     #                 sys.exit('exiting program')
     #
     # initiate raqc object with file paths
-    print('did i make it here')
+
     raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'], cfg['paths']['file_path_in_date2'],
                 cfg['paths']['file_path_topo'], cfg['paths']['file_path_out'], cfg['paths']['basin'], cfg['paths']['file_name_modifier'],
                 cfg['block_behavior']['elevation_band_resolution'])
@@ -123,6 +123,8 @@ def main():
     if not raqc_obj.already_clipped:
         remove_files = cfg['options']['remove_clipped_files']
         raqc_obj.clip_extent_overlap(remove_files)
+    else:
+        print('worked with clipped files')
 
     raqc_obj.make_diff_mat()
 
