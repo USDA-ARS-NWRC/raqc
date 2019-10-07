@@ -15,7 +15,8 @@ from memory_profiler import profile
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-                file_out_root, basin, file_name_modifier, elevation_band_resolution):
+                file_out_root, basin, season, file_name_modifier,
+                elevation_band_resolution):
         """
         Initiate self and add attributes needed throughout RAQC run.
         Ensure dates are in chronological order.
@@ -35,11 +36,11 @@ class MultiArrayOverlap(object):
         if check_chronology1 < check_chronology2:
             pass
         else:
-            sys.exit("Date 1 must occur before Date 2. Please switch Date 1 \
-                        with Date 2 in UserConfit. Exiting program")
+            sys.exit('Date 1 must occur before Date 2. Please switch Date 1'
+                        '\n with Date 2 in UserConfit. Exiting program')
 
         # Make subdirectory --> file_out_root/basin
-        file_out_basin = os.path.join(file_out_root, basin)
+        file_out_basin = os.path.join(file_out_root, season, basin)
         if not os.path.exists(file_out_basin):
             os.makedirs(file_out_basin)
 
@@ -80,7 +81,7 @@ class MultiArrayOverlap(object):
 
         if self.already_clipped:
             if not (os.path.isfile(file_path_dem) & os.path.isfile(file_path_veg)):
-                print(('{0}dem_common_extent and \n{0}_veg_height_common_extent'
+                print(('{0}_dem_common_extent and \n{0}_veg_height_common_extent'
                 '\nmust exist to pass clipped files directly in UserConfig').format(self.file_path_out_base))
 
                 sys.exit('Exiting ---- Ensure all clipped files present or simply'
@@ -250,10 +251,9 @@ class MultiArrayOverlap(object):
                         .format(round(rez), self.file_path_topo, \
                         self.file_path_out_base + '_dem.tif')
 
-            run_arg1b = 'gdal_translate -of GTiff -tr {0} {0} NE(bounds_date2[0] - bounds_date2_te[0]) / rezTCDF: \
-                        "{1}":veg_height {2}'.format(round(rez),
-                        self.file_path_topo, self.file_path_out_base
-                        + '_veg_height.tif')
+            run_arg1b ='gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":veg_height {2}' \
+                        .format(round(rez), self.file_path_topo, \
+                        self.file_path_out_base + '_veg_height.tif')
 
         # START Clipping
         if not self.extents_same:
@@ -295,12 +295,18 @@ class MultiArrayOverlap(object):
                         '_veg_height.tif', self.file_path_out_base + \
                         '_veg_height_common_extent.tif -overwrite')
 
-
+        print('run_arg1')
         run(run_arg1, shell=True)
+        print('run_arg1b')
+        print(run_arg1b)
         run(run_arg1b, shell=True)
+        print('arg2')
         run(run_arg2, shell = True)
+        print('arg3')
         run(run_arg3, shell = True)
+        print('arg4')
         run(run_arg4, shell = True)
+        print('arg4b')
         run(run_arg4b, shell = True)
 
         # remove unneeded files
@@ -716,13 +722,17 @@ class MultiArrayOverlap(object):
         """
 
         # ** limitation mentioned in docstring
-        coord_round = round(coord % rez, 0) != 0
+
+        coord_round = (round(coord) % round(rez) != 0)
+        print('coord round', round(coord))
+        print('rez round', round(rez))
+        print('coord_round', coord_round)
         if coord_round:
-            if (coord % rez) > 0.5 * rez:
-                # print('round up')
+            if coord_round > 0.5 * rez:
+                print('round up')
                 coord_updated = coord + (round(rez) - (coord % round(rez)))
             else:
-                # print('round down')
+                print('round down')
                 coord_updated = coord - (coord % round(rez))
         else:
             # print('no round')
@@ -926,11 +936,14 @@ class PatternFilters():
         return(pct)
 
 class Flags(MultiArrayOverlap, PatternFilters):
-    def init(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, basin, file_name_modifier):
+    def init(self, file_path_dataset1, file_path_dataset2, file_path_topo,
+            file_out_root, season, basin, file_name_modifier):
         """
         Protozoic attempt of use of inheritance
         """
-        MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2, file_path_topo, file_out_root, basin, file_name_modifier)
+        MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2,
+                                file_path_topo, file_out_root, season, basin,
+                                file_name_modifier)
 
     # @profile
     def make_histogram(self, name, nbins, thresh, moving_window_size):
