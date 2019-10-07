@@ -5,7 +5,7 @@ import time
 import numpy as np
 import scipy
 
-def plot_basic(self, action):
+def plot_basic(self, action, file_path_out):
     if action != None:
         # print('this is where matplotlib lives: ', matplotlib.matplotlib_fname())s
         pltz_obj = pltz.Plotables()
@@ -40,7 +40,7 @@ def plot_basic(self, action):
         if action == 'show':
             plt.show()
         elif action == 'save':
-            plt.savefig('/home/zachuhlmann/projects/data/test.png', dpi=180)
+            plt.savefig(file_path_out, dpi=180)
     else:
         pass
     # print('type initial ', type(self.bins))

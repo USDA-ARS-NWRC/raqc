@@ -15,7 +15,7 @@ from memory_profiler import profile
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-                file_out_root, basin, season, file_name_modifier,
+                file_out_root, basin, season, file_name_modifier, plot_file_name,
                 elevation_band_resolution):
         """
         Initiate self and add attributes needed throughout RAQC run.
@@ -40,7 +40,7 @@ class MultiArrayOverlap(object):
                         '\n with Date 2 in UserConfit. Exiting program')
 
         # Make subdirectory --> file_out_root/basin
-        file_out_basin = os.path.join(file_out_root, season, basin)
+        file_out_basin = os.path.join(file_out_root, basin, season)
         if not os.path.exists(file_out_basin):
             os.makedirs(file_out_basin)
 
@@ -55,6 +55,8 @@ class MultiArrayOverlap(object):
         self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_path_out_base)
         self.elevation_band_resolution = elevation_band_resolution
         self.file_path_out_json = '{0}_metadata.txt'.format(self.file_path_out_base)
+        self.file_path_out_histogram = '{0}_{1}.tif'.format(self.file_path_out_base, plot_file_name)
+        print(self.file_path_out_histogram)
         path_log_file = '{0}_memory_usage.log'.format(self.file_path_out_base)
         # log_file = open(path_log_file, 'w+')
 
@@ -659,7 +661,7 @@ class MultiArrayOverlap(object):
         print('save tiff = ', round(tock - tick, 2), 'seconds')
 
     def plot_this(self, action):
-        plot_basic(self, action)
+        plot_basic(self, action, self.file_path_out_histogram)
 
     def check_DEM_resolution(self):
         """
@@ -937,13 +939,13 @@ class PatternFilters():
 
 class Flags(MultiArrayOverlap, PatternFilters):
     def init(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-            file_out_root, season, basin, file_name_modifier):
+            file_out_root, season, basin, plot_file_name, file_name_modifier):
         """
         Protozoic attempt of use of inheritance
         """
         MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2,
                                 file_path_topo, file_out_root, season, basin,
-                                file_name_modifier)
+                                plot_file_name, file_name_modifier)
 
     # @profile
     def make_histogram(self, name, nbins, thresh, moving_window_size):
