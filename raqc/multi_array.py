@@ -15,7 +15,7 @@ from memory_profiler import profile
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-                file_out_root, basin, season, file_name_modifier, plot_file_name,
+                file_out_root, basin, file_name_modifier,
                 elevation_band_resolution):
         """
         Initiate self and add attributes needed throughout RAQC run.
@@ -40,23 +40,33 @@ class MultiArrayOverlap(object):
                         '\n with Date 2 in UserConfit. Exiting program')
 
         # Make subdirectory --> file_out_root/basin
-        file_out_basin = os.path.join(file_out_root, basin, season)
-        if not os.path.exists(file_out_basin):
-            os.makedirs(file_out_basin)
+        # file_out_basin = os.path.join(file_out_root, basin)
+        basin_abbr = file_path_dataset1.split('/')[-1].split('_')[0][:-8]  #basin abbreviation
+        year1 = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
+        year2 = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
+        self.file_path_out_base = os.path.join(file_out_root, basin, year1 + '_' + year2)
+
+        if not os.path.exists(self.file_path_out_base):
+            os.makedirs(self.file_path_out_base)
 
         # Make file paths
-        year1 = file_path_dataset1.split('/')[-1].split('_')[0]
-        year2 = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
-        file_base = '{0}_to_{1}'.format(year1, year2)
-        self.file_path_out_base = os.path.join(file_out_basin, file_base)
-        self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_path_out_base, file_name_modifier)
-        self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_path_out_base, file_name_modifier)
-        self.file_path_out_backup_config = '{0}_{1}_raqc_backup_config.ini'.format(self.file_path_out_base, file_name_modifier)
-        self.file_path_out_csv = '{0}_{1}_raqc.csv'.format(self.file_path_out_base, file_name_modifier)
+        file_name_base = '{0}_{1}'.format(basin_abbr + year1, year2)
+        self.file_name_base = os.path.join(self.file_path_out_base, file_name_base)
+        self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_name_base, file_name_modifier)
+        self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_name_base, file_name_modifier)
+        self.file_path_out_backup_config = '{0}_{1}_raqc_backup_config.ini'.format(self.file_name_base, file_name_modifier)
+        self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_name_base)
         self.elevation_band_resolution = elevation_band_resolution
-        self.file_path_out_json = '{0}_metadata.txt'.format(self.file_path_out_base)
-        self.file_path_out_histogram = '{0}_{1}_2D_histogram.tif'.format(self.file_path_out_base, file_name_modifier)
-        path_log_file = '{0}_memory_usage.log'.format(self.file_path_out_base)
+        self.file_path_out_json = '{0}_metadata.txt'.format(self.file_name_base)
+        self.file_path_out_histogram = '{0}_{1}_2D_histogram.tif'.format(self.file_name_base, file_name_modifier)
+        path_log_file = '{0}_memory_usage.log'.format(self.file_name_base)
+        print('basin_abbr ', basin_abbr)
+        print('year1 ', year1)
+        print('year2 ', year2)
+        print('file_path_out_base ', self.file_path_out_base)
+        print('file_path_out_base', self.file_name_base)
+        print('file_name_base ', file_name_base)
+        print('file_path_out_tif_flags', self.file_path_out_tif_flags)
         # log_file = open(path_log_file, 'w+')
 
         # check if user decided to pass clipped files in config file
@@ -77,28 +87,26 @@ class MultiArrayOverlap(object):
             sys.exit('program will exit for user to fix problem ---')
 
         # clipped (common_extent) topo derived files must also be in directory
-        file_path_dem = self.file_path_out_base + '_dem_common_extent.tif'
-        file_path_veg = self.file_path_out_base + '_veg_height_common_extent.tif'
+        file_path_dem = self.file_name_base + '_dem_common_extent.tif'
+        file_path_veg = self.file_name_base + '_veg_height_common_extent.tif'
 
         if self.already_clipped:
             if not (os.path.isfile(file_path_dem) & os.path.isfile(file_path_veg)):
                 print(('{0}_dem_common_extent and \n{0}_veg_height_common_extent'
-                '\nmust exist to pass clipped files directly in UserConfig').format(self.file_path_out_base))
+                '\nmust exist to pass clipped files directly in UserConfig').format(self.file_name_base))
 
                 sys.exit('Exiting ---- Ensure all clipped files present or simply'
                 '\npass original snow depth and topo files\n')
             else:
                 self.file_path_date1_clipped = file_path_dataset1
                 self.file_path_date2_clipped = file_path_dataset2
-                self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
-                # self.file_name_veg = self.file_path_out_base + '_veg_common_extent.tif'
+                self.file_name_dem = self.file_name_base + '_dem_common_extent.tif'
+                # self.file_name_veg = self.file_name_base + '_veg_common_extent.tif'
                         #
         if not self.already_clipped:
             self.file_path_dataset1 = file_path_dataset1
             self.file_path_dataset2 = file_path_dataset2
             self.file_path_topo = file_path_topo
-            self.file_out_basin = file_out_basin
-
 
     # @profile
     def clip_extent_overlap(self, remove_clipped_files):
@@ -117,11 +125,21 @@ class MultiArrayOverlap(object):
             meta2 = d2.profile
             # self.d2 = d2
 
+        topo = Dataset(self.file_path_topo)
+        x = topo.variables['x'][:]
+        y = topo.variables['y'][:]
+        topo_extents = [None] * 4
+        topo_extents[0], topo_extents[1], topo_extents[2], topo_extents[3], = x.min(), y.min(), x.max(), y.max()
+        rez3 = x[1] - x[0]
+        print(topo_extents)
+
         #formats string to open topo.nc file with rio.open
         topo_file_open_rio = 'netcdf:{}:dem'.format(self.file_path_topo)
         with rio.open(topo_file_open_rio) as src:
             d3 = src
             meta3 = d3.profile
+        print(d3.bounds.left, d3.bounds.bottom, d3.bounds.right, d3.bounds.top)
+        print(meta3)
         #grab basics
         # Note: This is the X Direction resolution.  We are assuming that X and Y
         # resolutions, when rounded are the same
@@ -142,10 +160,10 @@ class MultiArrayOverlap(object):
         # .nc have different standards for spatial metadata than geotiff,
         # At least the metadata derived in rasterio
 
-        d3_left = self.nc_to_tif(d3.bounds.left, rez3, 'up')
-        d3_bottom = self.nc_to_tif(d3.bounds.bottom, rez3, 'up')
-        d3_right = self.nc_to_tif(d3.bounds.right, rez3, 'down')
-        d3_top = self.nc_to_tif(d3.bounds.top, rez3, 'down')
+        d3_left = self.get_nc_bounds(d3.bounds.left, rez3, 'up')
+        d3_bottom = self.get_nc_bounds(d3.bounds.bottom, rez3, 'up')
+        d3_right = self.get_nc_bounds(d3.bounds.right, rez3, 'down')
+        d3_top = self.get_nc_bounds(d3.bounds.top, rez3, 'down')
 
         # check that date1 and date2 spatial resolutions are the same.
         if round(rez) == round(rez2):  #hack way to check all three rez the same
@@ -214,10 +232,10 @@ class MultiArrayOverlap(object):
         file_name_date2_te_second = os.path.splitext \
                                     (file_name_date2_te_temp)[0][id_date_start:]
         # ULTIMATELY what is used as file paths
-        file_path_date1_te = os.path.join(self.file_out_basin, \
+        file_path_date1_te = os.path.join(self.file_path_out_base, \
                                             file_name_date1_te_first + '_clipped_to_' + \
                                             file_name_date2_te_second + '.tif')
-        file_path_date2_te = os.path.join(self.file_out_basin, \
+        file_path_date2_te = os.path.join(self.file_path_out_base, \
                                             file_name_date2_te_first + '_clipped_to_' +  \
                                             file_name_date1_te_second + '.tif')
 
@@ -225,18 +243,18 @@ class MultiArrayOverlap(object):
         # files deleted upon UserConfig preference
         self.remove_clipped_files = remove_clipped_files
         self.new_file_list = [file_path_date1_te, file_path_date2_te, \
-                            self.file_path_out_base + '_dem_common_extent.tif', \
-                            self.file_path_out_base + '_veg_height_common_extent.tif']
+                            self.file_name_base + '_dem_common_extent.tif', \
+                            self.file_name_base + '_veg_height_common_extent.tif']
 
         # Create strings to run as os.run commands
 
         # Pull veg and dem from topo.nc and save as .tif
         if topo_rez_same:
             run_arg1 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format \
-                        (self.file_path_topo, self.file_path_out_base + '_dem.tif')
+                        (self.file_path_topo, self.file_name_base + '_dem.tif')
 
             run_arg1b = 'gdal_translate -of GTiff NETCDF:"{0}":veg_height {1}' \
-                        .format(self.file_path_topo, self.file_path_out_base +
+                        .format(self.file_path_topo, self.file_name_base +
                         '_veg_height.tif')
 
         # If spatial resolution of DEM differs from snow
@@ -250,11 +268,11 @@ class MultiArrayOverlap(object):
 
             run_arg1 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}' \
                         .format(round(rez), self.file_path_topo, \
-                        self.file_path_out_base + '_dem.tif')
+                        self.file_name_base + '_dem.tif')
 
             run_arg1b ='gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":veg_height {2}' \
                         .format(round(rez), self.file_path_topo, \
-                        self.file_path_out_base + '_veg_height.tif')
+                        self.file_name_base + '_veg_height.tif')
 
         # START Clipping
         if not self.extents_same:
@@ -270,13 +288,13 @@ class MultiArrayOverlap(object):
 
             run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
                         (left_max_bound, bottom_max_bound, right_min_bound, \
-                        top_min_bound, self.file_path_out_base + '_dem.tif', \
-                        self.file_path_out_base + '_dem_common_extent.tif -overwrite')
+                        top_min_bound, self.file_name_base + '_dem.tif', \
+                        self.file_name_base + '_dem_common_extent.tif -overwrite')
 
             run_arg4b = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format( \
                         left_max_bound, bottom_max_bound, right_min_bound, \
-                        top_min_bound, self.file_path_out_base + '_veg_height.tif', \
-                        self.file_path_out_base + '_veg_height_common_extent.tif -overwrite')
+                        top_min_bound, self.file_name_base + '_veg_height.tif', \
+                        self.file_name_base + '_veg_height_common_extent.tif -overwrite')
 
         else:
             # if date1, date2 and topo.nc are the same extents, don't waste time
@@ -289,11 +307,11 @@ class MultiArrayOverlap(object):
                         file_path_date1_te)
             run_arg3 = 'cp {} {}'.format(self.file_path_dataset2,
                         file_path_date2_te)
-            run_arg4 = 'cp {} {}'.format(self.file_path_out_base + \
-                        '_dem_common_extent.tif', self.file_path_out_base + \
-                        '_dem_common_extent_common_extent.tif -overwrite')
-            run_arg4b = 'cp {} {}'.format(self.file_path_out_base + \
-                        '_veg_height.tif', self.file_path_out_base + \
+            run_arg4 = 'cp {} {}'.format(self.file_name_base + \
+                        '_dem.tif', self.file_name_base + \
+                        '_dem_common_extent.tif -overwrite')
+            run_arg4b = 'cp {} {}'.format(self.file_name_base + \
+                        '_veg_height.tif', self.file_name_base + \
                         '_veg_height_common_extent.tif -overwrite')
 
         print('run_arg1')
@@ -311,8 +329,8 @@ class MultiArrayOverlap(object):
         run(run_arg4b, shell = True)
 
         # remove unneeded files
-        run_arg5 = 'rm ' + self.file_path_out_base + '_dem.tif'
-        run_arg5b = 'rm ' + self.file_path_out_base + '_veg_height.tif'
+        run_arg5 = 'rm ' + self.file_name_base + '_dem.tif'
+        run_arg5b = 'rm ' + self.file_name_base + '_veg_height.tif'
         run(run_arg5, shell = True)
         run(run_arg5b, shell = True)
 
@@ -320,12 +338,12 @@ class MultiArrayOverlap(object):
         if not self.extents_same:
             self.file_path_date1_clipped = file_path_date1_te
             self.file_path_date2_clipped = file_path_date2_te
-            self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
+            self.file_name_dem = self.file_name_base + '_dem_common_extent.tif'
         # if not clipped, use original file
         else:
             self.file_path_date1_clipped = self.file_path_date1
             self.file_path_date2_clipped = self.file_path_date2
-            self.file_name_dem = self.file_path_out_base + '_dem_common_extent.tif'
+            self.file_name_dem = self.file_name_base + '_dem_common_extent.tif'
         print('topo rez ', topo_rez_same)
 
     # @profile
@@ -724,11 +742,11 @@ class MultiArrayOverlap(object):
 
         # ** limitation mentioned in docstring
 
-        coord_round = (round(coord) % round(rez) != 0)
-        print('coord round', round(coord))
-        print('rez round', round(rez))
-        print('coord_round', coord_round)
-        if coord_round:
+        coord_round = round(coord) % round(rez)
+        # print('coord round', round(coord))
+        # print('rez round', round(rez))
+        # print('coord_round', coord_round)
+        if coord_round != 0:
             if coord_round > 0.5 * rez:
                 print('round up')
                 coord_updated = coord + (round(rez) - (coord % round(rez)))
@@ -786,11 +804,13 @@ class MultiArrayOverlap(object):
         self.orig_shape = tuple(orig_shape)
         return(dataset_orig)
 
-    def nc_to_tif(self, extent, rez, down_up):
+    def get_nc_bounds(self, extent, rez, down_up):
+        print('extent in', extent)
         if down_up == 'down':
             extent = extent - rez / 2
         if down_up == 'up':
             extent = extent + rez / 2
+        print('extent returned ', extent)
         return(extent)
 
     def trim_extent_nan(self, name):
@@ -938,13 +958,13 @@ class PatternFilters():
 
 class Flags(MultiArrayOverlap, PatternFilters):
     def init(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-            file_out_root, season, basin, plot_file_name, file_name_modifier):
+            file_out_root, basin, file_name_modifier, elevation_band_resolution):
         """
         Protozoic attempt of use of inheritance
         """
         MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2,
-                                file_path_topo, file_out_root, season, basin,
-                                plot_file_name, file_name_modifier)
+                                file_path_topo, file_out_root, basin,
+                                file_name_modifier)
 
     # @profile
     def make_histogram(self, name, nbins, thresh, moving_window_size):
@@ -1244,7 +1264,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.snowline_elev = self.elevation_edges[id_min]  #elevation of estimated snowline
 
         # Open veg layer from topo.nc and identify pixels with veg present (veg_height > 5)
-        with rio.open(self.file_path_out_base + '_veg_height_common_extent.tif') as src:
+        with rio.open(self.file_name_base + '_veg_height_common_extent.tif') as src:
             topo_te = src
             veg_height_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
             self.veg_height_clip = veg_height_clip[0]
