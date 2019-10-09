@@ -51,12 +51,11 @@ class MultiArrayOverlap(object):
         self.file_path_out_base = os.path.join(file_out_basin, file_base)
         self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_path_out_base, file_name_modifier)
         self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_path_out_base, file_name_modifier)
-        self.file_path_out_backup_config = '{0}_{1}'.format(self.file_path_out_base, 'raqc_backup_config.ini')
-        self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_path_out_base)
+        self.file_path_out_backup_config = '{0}_{1}_raqc_backup_config.ini'.format(self.file_path_out_base, file_name_modifier)
+        self.file_path_out_csv = '{0}_{1}_raqc.csv'.format(self.file_path_out_base, file_name_modifier)
         self.elevation_band_resolution = elevation_band_resolution
         self.file_path_out_json = '{0}_metadata.txt'.format(self.file_path_out_base)
-        self.file_path_out_histogram = '{0}_{1}.tif'.format(self.file_path_out_base, plot_file_name)
-        print(self.file_path_out_histogram)
+        self.file_path_out_histogram = '{0}_{1}_2D_histogram.tif'.format(self.file_path_out_base, file_name_modifier)
         path_log_file = '{0}_memory_usage.log'.format(self.file_path_out_base)
         # log_file = open(path_log_file, 'w+')
 
