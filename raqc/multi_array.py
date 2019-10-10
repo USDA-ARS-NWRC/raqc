@@ -55,18 +55,34 @@ class MultiArrayOverlap(object):
         self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_name_base, file_name_modifier)
         self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_name_base, file_name_modifier)
         self.file_path_out_backup_config = '{0}_{1}_raqc_backup_config.ini'.format(self.file_name_base, file_name_modifier)
+        if os.path.exists(self.file_path_out_backup_config):
+            print('\n{0}\nThe file: {1}'
+                    '\nalready exists,indicating that raqc was previously'
+                    '\nrun with a user config including the same input files'
+                    '\nand file_name_modifier, "{2}".'
+                    '\n\nThis will overwrite files from'
+                    '\nprevious run if in existence.'
+                    '\n\ntype    "proceed"   to proceed as is'
+                    '\nor type   "exit"      to exit and change user config' \
+                    .format('-'*60, self.file_path_out_backup_config, file_name_modifier))
+            while True:
+                response = input('\n')
+                if response.lower() == 'proceed':
+                    break
+                elif response.lower() == 'exit':
+                    os.sys.exit('\nexiting\n' + '-'*60)
+                else:
+                    print('\nresponse not recognized\n'
+                    '\ntype    "proceed"   to proceed as is'
+                    '\nor      "exit"      to exit and fix user config')
+                    pass
+
         self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_name_base)
         self.elevation_band_resolution = elevation_band_resolution
         self.file_path_out_json = '{0}_metadata.txt'.format(self.file_name_base)
-        self.file_path_out_histogram = '{0}_{1}_2D_histogram.tif'.format(self.file_name_base, file_name_modifier)
+        self.file_path_out_histogram = '{0}_{1}_2D_histogram.png'.format(self.file_name_base, file_name_modifier)
         path_log_file = '{0}_memory_usage.log'.format(self.file_name_base)
-        print('basin_abbr ', basin_abbr)
-        print('year1 ', year1)
-        print('year2 ', year2)
-        print('file_path_out_base ', self.file_path_out_base)
-        print('file_path_out_base', self.file_name_base)
-        print('file_name_base ', file_name_base)
-        print('file_path_out_tif_flags', self.file_path_out_tif_flags)
+
         # log_file = open(path_log_file, 'w+')
 
         # check if user decided to pass clipped files in config file
@@ -125,21 +141,12 @@ class MultiArrayOverlap(object):
             meta2 = d2.profile
             # self.d2 = d2
 
-        topo = Dataset(self.file_path_topo)
-        x = topo.variables['x'][:]
-        y = topo.variables['y'][:]
-        topo_extents = [None] * 4
-        topo_extents[0], topo_extents[1], topo_extents[2], topo_extents[3], = x.min(), y.min(), x.max(), y.max()
-        rez3 = x[1] - x[0]
-        print(topo_extents)
-
         #formats string to open topo.nc file with rio.open
         topo_file_open_rio = 'netcdf:{}:dem'.format(self.file_path_topo)
         with rio.open(topo_file_open_rio) as src:
             d3 = src
             meta3 = d3.profile
-        print(d3.bounds.left, d3.bounds.bottom, d3.bounds.right, d3.bounds.top)
-        print(meta3)
+
         #grab basics
         # Note: This is the X Direction resolution.  We are assuming that X and Y
         # resolutions, when rounded are the same
@@ -210,10 +217,6 @@ class MultiArrayOverlap(object):
         bottom_max_bound = self.increment_extents(bottom_max_bound, rez2, 'up')
         right_min_bound = self.increment_extents(right_min_bound, rez2, 'down')
         top_min_bound = self.increment_extents(top_min_bound, rez2, 'down')
-
-        print('Cols, ', (right_min_bound - left_max_bound) / round(rez2))
-        print('rows, ', (top_min_bound - bottom_max_bound) / round(rez2))
-        print(left_max_bound, right_min_bound, top_min_bound, bottom_max_bound)
 
         # Create file paths and names
         file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
@@ -314,18 +317,11 @@ class MultiArrayOverlap(object):
                         '_veg_height.tif', self.file_name_base + \
                         '_veg_height_common_extent.tif -overwrite')
 
-        print('run_arg1')
         run(run_arg1, shell=True)
-        print('run_arg1b')
-        print(run_arg1b)
         run(run_arg1b, shell=True)
-        print('arg2')
         run(run_arg2, shell = True)
-        print('arg3')
         run(run_arg3, shell = True)
-        print('arg4')
         run(run_arg4, shell = True)
-        print('arg4b')
         run(run_arg4b, shell = True)
 
         # remove unneeded files
@@ -344,7 +340,6 @@ class MultiArrayOverlap(object):
             self.file_path_date1_clipped = self.file_path_date1
             self.file_path_date2_clipped = self.file_path_date2
             self.file_name_dem = self.file_name_base + '_dem_common_extent.tif'
-        print('topo rez ', topo_rez_same)
 
     # @profile
     def mask_basic(self):
@@ -530,7 +525,6 @@ class MultiArrayOverlap(object):
             buffer.update({'bottom' : round((bounds_date2[1] - bounds_date2_te[1]) / rez)})
             buffer.update({'right' : round((bounds_date2[2] - bounds_date2_te[2]) / rez) * -1})
             buffer.update({'top' : round((bounds_date2[3] - bounds_date2_te[3]) / rez)})
-            buffer[buffer==0] = None
             for k, v in buffer.items():
                 if v == 0:
                     buffer[k] = None
@@ -631,14 +625,11 @@ class MultiArrayOverlap(object):
         array_names = []
         if include_arrays != None:
             for array in include_arrays:
-                print('included these arrays: ', array)
                 array_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
-
 
             for id, band in enumerate(array_names):
                 array_buffer = np.full(self.orig_shape, -9999, dtype = 'float32')
                 mat_temp = getattr(self, band)
-                print('arrays are of dtype: ', type(mat_temp[0][0]))
                 array_buffer[buffer['top'] : buffer['bottom'], \
                             buffer['left'] : buffer['right']] = mat_temp
                 setattr(self, band, array_buffer)
@@ -654,7 +645,6 @@ class MultiArrayOverlap(object):
 
         with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
             for id, band in enumerate(array_names, start = 1):
-                print(id)
                 # try:
                 #     print('which arrays: ', array_names[id - 1])
                 #     dst.write_band(id, getattr(self, array_names[id - 1]))
@@ -689,9 +679,6 @@ class MultiArrayOverlap(object):
         min_elev, max_elev = np.min(self.dem_clip), np.max(self.dem_clip)
         num_elev_bins = math.ceil((max_elev - min_elev) / self.elevation_band_resolution)
         min_elev_band_rez = math.ceil((max_elev - min_elev) / 254)
-        print(min_elev)
-        print(max_elev)
-        print(num_elev_bins)
         if num_elev_bins > 254:
             print('In the interest of saving memory, please lower (make more coarse)' \
             '\nyour elevation band resolution' \
@@ -743,18 +730,12 @@ class MultiArrayOverlap(object):
         # ** limitation mentioned in docstring
 
         coord_round = round(coord) % round(rez)
-        # print('coord round', round(coord))
-        # print('rez round', round(rez))
-        # print('coord_round', coord_round)
         if coord_round != 0:
             if coord_round > 0.5 * rez:
-                print('round up')
                 coord_updated = coord + (round(rez) - (coord % round(rez)))
             else:
-                print('round down')
                 coord_updated = coord - (coord % round(rez))
         else:
-            # print('no round')
             coord_updated = coord
         print('coord, ', coord)
         print('coord_updated, ', coord_updated)
@@ -920,7 +901,7 @@ class PatternFilters():
                 #NOTE:  this can be CUSTOMIZED! Instead of pct, calculate other metric
                 pct[i,j] = (np.sum(sub > 0)) / sub.shape[0]
         tock = time.clock()
-        print('mov_wind zach version = ', tock - tick, 'seconds')
+        print('mov_wind zach version = ', round(tock - tick, 2), 'seconds')
         return(pct)
 
     # @profile
@@ -1023,7 +1004,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.flag_histogram = hist_outliers
 
         tock = time.clock()
-        print('hist2D_with_bins_mapped = ', tock - tick, 'seconds')
+        print('hist2D_with_bins_mapped = ', round(tock - tick, 2), 'seconds')
 
     def flag_basin_blocks(self, apply_moving_window, moving_window_size, neighbor_threshold, snowline_threshold):
         """
@@ -1062,7 +1043,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
             pct = self.mov_wind2(basin_gain, moving_window_size)
             self.flag_basin_gain = (pct > neighbor_threshold) & self.all_gain
         else:
-            print('no moving window')
             self.flag_basin_loss = basin_loss
             self.flag_basin_gain = basin_gain
 
