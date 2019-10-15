@@ -120,14 +120,12 @@ def main():
                 cfg['paths']['file_path_out'], cfg['paths']['basin'],
                 cfg['paths']['file_name_modifier'],
                 cfg['block_behavior']['elevation_band_resolution'])
-    print('in cli ', raqc_obj.file_path_out_histogram)
 
     # if files passed are already clipped to each other, then no need to repeat
     if not raqc_obj.already_clipped:
         remove_files = cfg['options']['remove_clipped_files']
         raqc_obj.clip_extent_overlap(remove_files)
     else:
-        print('worked with clipped files')
 
     raqc_obj.make_diff_mat()
 

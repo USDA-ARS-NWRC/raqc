@@ -503,21 +503,6 @@ class MultiArrayOverlap(object):
             bounds_date2[2] = self.increment_extents(d_orig['right'], rez, 'down')
             bounds_date2[3] = self.increment_extents(d_orig['top'], rez, 'down')
 
-            # if self.already_clipped:
-            #     rez = d_orig['resolution']
-            #     bounds_date2 = [None] * 4
-            #     bounds_date2[0] = self.increment_extents(d_orig['left'], rez, 'up')
-            #     bounds_date2[1] = self.increment_extents(d_orig['bottom'], rez, 'up')
-            #     bounds_date2[2] = self.increment_extents(d_orig['right'], rez, 'down')
-            #     bounds_date2[3] = self.increment_extents(d_orig['top'], rez, 'down')
-            #     rez = d_orig['resolution']
-            # else:
-            #     bounds_date2 = [None] * 4
-            #     bounds_date2[0] = self.increment_extents(self.d2.bounds.left, self.rez, 'up')
-            #     bounds_date2[1] = self.increment_extents(self.d2.bounds.bottom, self.rez, 'up')
-            #     bounds_date2[2] = self.increment_extents(self.d2.bounds.right, self.rez, 'down')
-            #     bounds_date2[3] = self.increment_extents(self.d2.bounds.top, self.rez, 'down')
-            #     rez = self.rez
             buffer={}
             # Notice '*-1'.  Those ensure subsetting flag array into nan array
             # buffers -<buffer> on right and bottom, and +<buffer> top and left
@@ -551,6 +536,10 @@ class MultiArrayOverlap(object):
         """
 
         tick = time.clock()
+
+        # determine if clipping occured
+        self.determine_if_extents_changed()
+
         # now that calculations complete (i.e. self.mat_diff > 1), set -9999 to nan
         self.mat_diff[~self.mask_nan_snow_present] = np.nan
         self.mat_diff_norm[~self.mask_nan_snow_present] = np.nan
@@ -561,11 +550,11 @@ class MultiArrayOverlap(object):
         # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
         self.mask_overlap_nan = ~self.mask_overlap_nan
 
-    # PREPARE bands to be saved to tif
-    # for config parsimony, user selected 'basin_block' 'elevation_block' and/or 'tree'
-    # which initiates 'loss' and 'gain' flags for each.
-    # Below code simply parses the three user config values into
-    # 'loss' and 'gain' for each and saves as flags names for output.
+        # PREPARE bands to be saved to tif
+        # for config parsimony, user selected 'basin_block' 'elevation_block' and/or 'tree'
+        # which initiates 'loss' and 'gain' flags for each.
+        # Below code simply parses the three user config values into
+        # 'loss' and 'gain' for each and saves as flags names for output.
         flag_names = []
         for flag in flags:
             if flag not in ['basin_block', 'elevation_block', 'tree']:
@@ -584,46 +573,45 @@ class MultiArrayOverlap(object):
             for mask in include_masks:
                 flag_names.append('mask_' + mask)
 
-        # finally, change abbreviated object names to verbose, intuitive names
-        band_names = self.apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
+            # finally, change abbreviated object names to verbose, intuitive names
+            band_names = self.apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
 
-        # determine if clipping occured
-        self.determine_if_extents_changed()
-        # if self.disjoint_bounds:
-        if not self.extents_same:
-            buffer = self.buffer
-            # buffer flag arrays with nans to fit original date2 array shape
-            # nan = <uint> 255
-            for id, band in enumerate(flag_names):
-                flag_buffer = np.full(self.orig_shape, 255, dtype = 'uint8')
-                mat_temp = getattr(self, band)
-                flag_buffer[buffer['top'] : buffer['bottom'], buffer['left'] : buffer['right']] = mat_temp
-                setattr(self, band, flag_buffer)
+            # if self.disjoint_bounds:
+            if not self.extents_same:
+                buffer = self.buffer
+                # buffer flag arrays with nans to fit original date2 array shape
+                # nan = <uint> 255
+                for id, band in enumerate(flag_names):
+                    flag_buffer = np.full(self.orig_shape, 255, dtype = 'uint8')
+                    mat_temp = getattr(self, band)
+                    flag_buffer[buffer['top'] : buffer['bottom'], buffer['left'] : buffer['right']] = mat_temp
+                    setattr(self, band, flag_buffer)
 
-            # grab json with original metadata and format some key value pairs
-            self.update_meta_from_json()
-            # update clipped metadata with that of original - extents, resolutition, etc.
-            self.meta2_te.update(self.meta_orig)
+                # grab json with original metadata and format some key value pairs
+                self.update_meta_from_json()
+                # update clipped metadata with that of original - extents, resolutition, etc.
+                self.meta2_te.update(self.meta_orig)
 
-        # upate metadata to include number of bands (flags) and uint8 dtype
-        self.meta2_te.update({
-            'count': len(flag_names),
-            'dtype': 'uint8',
-            'nodata': 255})
+            # upate metadata to include number of bands (flags) and uint8 dtype
+            self.meta2_te.update({
+                'count': len(flag_names),
+                'dtype': 'uint8',
+                'nodata': 255})
 
-        # Write new file
-        with rio.open(self.file_path_out_tif_flags, 'w', **self.meta2_te) as dst:
-            for id, band in enumerate(flag_names, start = 1):
-                try:
-                    dst.write_band(id, getattr(self, flag_names[id - 1]))
-                    dst.set_band_description(id, band_names[id - 1])
-                except ValueError:  # Rasterio has no float16  >> cast to float32
-                    mat_temp = getattr(self, flag_names[id - 1])
-                    dst.write_band(id, mat_temp.astype('uint8'))
-                    dst.set_band_description(id, band_names[id - 1])
+            # Write new file
+            with rio.open(self.file_path_out_tif_flags, 'w', **self.meta2_te) as dst:
+                for id, band in enumerate(flag_names, start = 1):
+                    try:
+                        dst.write_band(id, getattr(self, flag_names[id - 1]))
+                        dst.set_band_description(id, band_names[id - 1])
+                    except ValueError:  # Rasterio has no float16  >> cast to float32
+                        mat_temp = getattr(self, flag_names[id - 1])
+                        dst.write_band(id, mat_temp.astype('uint8'))
+                        dst.set_band_description(id, band_names[id - 1])
 
-        array_names = []
+
         if include_arrays != None:
+            array_names = []
             for array in include_arrays:
                 array_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
 
@@ -634,27 +622,25 @@ class MultiArrayOverlap(object):
                             buffer['left'] : buffer['right']] = mat_temp
                 setattr(self, band, array_buffer)
 
-        # finally, change abbreviated object names to verbose, intuitive names
-        band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
+            # finally, change abbreviated object names to verbose, intuitive names
+            band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
 
-        # update metadata to reflect new band count
-        self.meta2_te.update({
-            'count': len(array_names),
-            'dtype': 'float32',
-            'nodata': -9999})
+            # update metadata to reflect new band count
+            self.meta2_te.update({
+                'count': len(array_names),
+                'dtype': 'float32',
+                'nodata': -9999})
 
-        with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
-            for id, band in enumerate(array_names, start = 1):
-                # try:
-                #     print('which arrays: ', array_names[id - 1])
-                #     dst.write_band(id, getattr(self, array_names[id - 1]))
-                #     dst.set_band_description(id, band_names[id - 1])
-                # except ValueError:  # Rasterio has no float16  >> cast to float32
-                mat_temp = getattr(self, array_names[id - 1])
-                dst.write_band(id, mat_temp.astype('float32'))
-                dst.set_band_description(id, band_names[id - 1])
-
-        tock = time.clock()
+            with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
+                for id, band in enumerate(array_names, start = 1):
+                    # try:
+                    #     print('which arrays: ', array_names[id - 1])
+                    #     dst.write_band(id, getattr(self, array_names[id - 1]))
+                    #     dst.set_band_description(id, band_names[id - 1])
+                    # except ValueError:  # Rasterio has no float16  >> cast to float32
+                    mat_temp = getattr(self, array_names[id - 1])
+                    dst.write_band(id, mat_temp.astype('float32'))
+                    dst.set_band_description(id, band_names[id - 1])
 
         # Now all is complete, DELETE clipped files from clip_extent_overlap()
         # Upon user specification in UserConfig,
@@ -665,6 +651,7 @@ class MultiArrayOverlap(object):
         except AttributeError:  #occurs if user passed clipped files through config
             pass
 
+        tock = time.clock()
         print('save tiff = ', round(tock - tick, 2), 'seconds')
 
     def plot_this(self, action):
@@ -1098,7 +1085,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         thresh_lower_norm = np.zeros(id_dem_unique.shape, dtype = np.float16)
         thresh_upper_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
         thresh_lower_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
-        elevation_count = np.zeros(id_dem_unique.shape, dtype = np.int16)
+        elevation_count = np.zeros(id_dem_unique.shape, dtype = np.int64)
         for id, id_dem_unique2 in enumerate(id_dem_unique):
             temp = mat_diff_norm_masked
             temp2 = mat_diff_masked
