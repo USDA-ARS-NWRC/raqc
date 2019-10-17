@@ -44,48 +44,66 @@ def main():
         # determine which flags were requested
         basin_in_flag = 'basin_block' in flags
         elevation_in_flag = 'elevation_block' in flags
+        # initiate both_present
         both_present = False
-        missing = []
+        missing_flag = []
         while True:
             if basin_in_flag & elevation_in_flag:
                 both_present = True
                 break
             else:
-                if any([wrd in (tree_loss + tree_gain) for wrd in ['or', 'and']]): # 'and' 'or' requested but only basin or elevation flag requested
+            # [flag][flag] contains either basin, elevation or neither
+                if any([wrd in (tree_loss + tree_gain) for wrd in ['or', 'and']]):
+                    # both elevation and basin blocks needed but not in
+                    # in UserConfig [flags][flags]
                     if basin_in_flag + elevation_in_flag == 0:
-                        missing.extend(('elevation_block', 'basin_block'))
+                        # need both elevation and basin flags
+                        missing_flag.extend(('elevation_block', 'basin_block'))
                     else:
-                        [missing.append(item) for item in [basin_in_flag * 'elevation_block', elevation_in_flag * 'basin_block'] if item != '']
-                else:   # if no 'and' 'or' but only basin, elevation or neither flag requested
+                        # adds missing flag string to list
+                        [missing_flag.append(item) for item in \
+                        [basin_in_flag * 'elevation_block', \
+                         elevation_in_flag * 'basin_block'] if item != '']
+                else:
+                 # if no 'and' 'or' but basin, elevation or neither flag requested
                     dict_logic = {'basin' : 1, 'elevation' : -1}
-                    dict_determine_required = {2 : 'basin_block', -2 : 'elevation_block'}
+                    dict_determine_required = {2 : 'basin_block', \
+                                                -2 : 'elevation_block'}
                     keys = dict_logic[tree_loss] + dict_logic[tree_gain]
-                    if keys == 0:  # both elevation and basin requested for trees, but not in flags
-                        # missing.extend((basin_in_flag * 'elevation_block', elevation_in_flag * 'basin_block'))
-                        [missing.append(item) for item in [basin_in_flag * 'elevation_block', elevation_in_flag * 'basin_block'] if item != '']
+                    if keys == 0:
+                        # both elevation and basin requested for trees,
+                        # but one or both not in flags
+                        [missing_flag.append(item) for item in \
+                        [basin_in_flag * 'elevation_block', \
+                         elevation_in_flag * 'basin_block'] if item != '']
                         break
                     else:
                         if keys == basin_in_flag * 2:
+                            # tree loss and/or tree gain have needed flags (basin)
                             pass
                         elif keys == elevation_in_flag * -2:
+                            # tree loss and/or tree gain have needed flags (elevation)
                             pass
                         else:
+                            # tree loss and/or tree gain are missig basin or elevation
                             required = dict_determine_required[keys]
-                            missing.append(required)
+                            missing_flag.append(required)
             if not both_present:
-                if len(missing) == 2:
-                    missing_temp = missing.copy()
+                if len(missing_flag) == 2:
+                    missing_temp = missing_flag.copy()
                     missing_temp.insert(1, 'and')
-                missing_concat = ' '.join(missing_temp)
+                    missing_concat = ' '.join(missing_temp)
+                else:
+                    missing_concat = missing_flag
                 print(("The tree flag was requested in the UserConfig."
                         "\nThis REQUIRES both elevation_block and basin_block flags."
-                        "\nYou are MISSING: {0} flags"
+                        "\nYou are MISSING: {0} Config flags"
                         "\nWould you like to add those flags?"
                         "\nIf 'no', system will exit"
                         "\nNote: if 'yes', these values will NOT be saved to the backup_config").format(missing_concat))
                 response = input()
                 if response.lower() == 'yes':
-                    flags.extend(missing)
+                    flags.extend(missing_flag)
                     pass
                 elif response.lower() == 'no':
                     sys.exit("exiting program")
@@ -125,7 +143,6 @@ def main():
     if not raqc_obj.already_clipped:
         remove_files = cfg['options']['remove_clipped_files']
         raqc_obj.clip_extent_overlap(remove_files)
-    else:
 
     raqc_obj.make_diff_mat()
 
