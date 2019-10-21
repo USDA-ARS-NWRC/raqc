@@ -7,6 +7,7 @@ import rasterio as rios
 import sys, os
 from subprocess import check_output
 import argparse
+import copy
 
 
 def main():
@@ -26,15 +27,17 @@ def main():
         print_config_report(warnings,errors)
 
     #checking_later allows not to crash with errors.
-    cfg = ucfg.cfg
+    cfg = copy.deepcopy(ucfg.cfg)
+    # cfg['flags']['flags'].extend(['test'])
+    # print(cfg['flags']['flags'])
+    # print(ucfg.cfg['flags']['flags'])
 
     # ENSURE elevation and basin were in flags[flags] if trees was
     # Gather all flags specified in config
-    flags = cfg['flags']['flags']
 
     # TONS of logic to populate some flags if necessary
     # Tree flag requires basin_block and/or elevation_block.  Check that values are present in UserConfig
-    if 'tree' not in flags:
+    if 'tree' not in cfg['flags']['flags']:
         tree = False
     else:
         tree = True
@@ -42,8 +45,8 @@ def main():
         tree_gain = cfg['flags']['tree_gain']
 
         # determine which flags were requested
-        basin_in_flag = 'basin_block' in flags
-        elevation_in_flag = 'elevation_block' in flags
+        basin_in_flag = 'basin_block' in cfg['flags']['flags']
+        elevation_in_flag = 'elevation_block' in cfg['flags']['flags']
         # initiate both_present
         both_present = False
         missing_flag = []
@@ -93,45 +96,24 @@ def main():
                     missing_temp = missing_flag.copy()
                     missing_temp.insert(1, 'and')
                     missing_concat = ' '.join(missing_temp)
+                    missing_concat = 'the {} flags'.format(missing_concat)
                 else:
-                    missing_concat = missing_flag
-                print(("The tree flag was requested in the UserConfig."
+                    missing_concat = 'the {} flag'.format(missing_flag[0])
+                print(("\nThe tree flag was requested in the UserConfig."
                         "\nThis REQUIRES both elevation_block and basin_block flags."
-                        "\nYou are MISSING: {0} Config flags"
-                        "\nWould you like to add those flags?"
-                        "\nIf 'no', system will exit"
-                        "\nNote: if 'yes', these values will NOT be saved to the backup_config").format(missing_concat))
+                        "\nYou are MISSING: {0}"
+                        "\nWould you like to add the flag(s)?"
+                        "\ntype 'yes' or 'no'"
+                        "\nIf 'no', system will exit").format(missing_concat))
                 response = input()
                 if response.lower() == 'yes':
-                    flags.extend(missing_flag)
+                    cfg['flags']['flags'].extend(missing_flag)
                     pass
                 elif response.lower() == 'no':
                     sys.exit("exiting program")
                 else:
                     print('please answer "yes" or "no"')
                 break
-
-    # # check
-    # while True:
-    #         if ct == 0:
-    #             if want_plot == 'show':
-    #                 raqc_obj.plot_this(want_plot)
-    #                 break
-    #             elif want_plot == 'save':
-    #                 raqc_obj.plot_this(want_plot)
-    #                 break
-    #             elif want_plot == None:
-    #                 break
-    #             else:
-    #                 pass
-    #         else:
-    #             print("Only values accepted for [option][plots] are 'show', 'save' or None"
-    #                     "/nType 'n' to exit and fix UserConfig, or type one of the accepted values to continue'")
-    #             want_plot = input()
-    #             if want_plot.lower() == 'n':
-    #                 sys.exit('exiting program')
-    #
-    # initiate raqc object with file paths
 
     raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'],
                 cfg['paths']['file_path_in_date2'], cfg['paths']['file_path_topo'],
@@ -155,7 +137,7 @@ def main():
     raqc_obj.mask_advanced(name, action, operator, value)
 
     # if user specified histogram outliers in user config
-    if 'histogram' in flags:
+    if 'histogram' in cfg['flags']['flags']:
         histogram_mats = cfg['histogram_outliers']['histogram_mats']
         num_bins = cfg['histogram_outliers']['num_bins']
         threshold_histogram_space = cfg['histogram_outliers']['threshold_histogram_space']
@@ -165,7 +147,7 @@ def main():
 
     # if user wants to check for blocks
     for flag in ['basin_block', 'elevation_block']:
-        if flag in flags:
+        if flag in cfg['flags']['flags']:
             block_window_size = cfg['block_behavior']['moving_window_size']
             block_window_threshold = cfg['block_behavior']['neighbor_threshold']
             snowline_threshold = cfg['block_behavior']['snowline_threshold']
@@ -191,10 +173,11 @@ def main():
     include_arrays = cfg['options']['include_arrays']
     include_masks = cfg['options']['include_masks']
 
-    raqc_obj.save_tiff(file_out, flags, include_arrays, include_masks)
+    raqc_obj.save_tiff(file_out, cfg['flags']['flags'], include_arrays, include_masks)
 
     #backup config file
     config_backup_location = raqc_obj.file_path_out_backup_config
+    ucfg.cfg = cfg
     generate_config(ucfg, config_backup_location)
 
 if __name__=='__main__':
