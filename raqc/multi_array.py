@@ -609,7 +609,6 @@ class MultiArrayOverlap(object):
                     dst.write_band(id, mat_temp.astype('uint8'))
                     dst.set_band_description(id, band_names[id - 1])
 
-
         if include_arrays != None:
             array_names = []
             for array in include_arrays:
@@ -634,6 +633,9 @@ class MultiArrayOverlap(object):
 
             with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
                 for id, band in enumerate(array_names, start = 1):
+                    print('array_names ', array_names)
+                    print('array_names[id-1] ', array_names[id-1])
+                    print('band ', band)
                     # try:
                     #     print('which arrays: ', array_names[id - 1])
                     #     dst.write_band(id, getattr(self, array_names[id - 1]))
@@ -1034,6 +1036,38 @@ class Flags(MultiArrayOverlap, PatternFilters):
             self.flag_basin_loss = basin_loss
             self.flag_basin_gain = basin_gain
 
+    def get_elevation_bins(self, dem_mask_name):
+        # use overlap_nan mask for snowline because we want to get average
+        # snow per elevation band INCLUDING zero snow depth
+        dem_mask = getattr(self, dem_mask_name)
+        dem_clipped = self.dem_clip[dem_mask]
+        min_elev, max_elev = np.min(dem_clipped), np. max(dem_clipped)
+
+        # Sets dem bins edges to be evenly divisible by the elevation band rez
+        edge_min = min_elev % self.elevation_band_resolution
+        edge_min = min_elev - edge_min
+        edge_max = max_elev % self.elevation_band_resolution
+        edge_max = max_elev + (self.elevation_band_resolution - edge_max)
+        # creates elevation bin edges using min, max and elevation band resolution
+        self.elevation_edges = np.arange(edge_min, edge_max + 0.1, \
+                                        self.elevation_band_resolution)
+        print('bin edges ', self.elevation_edges)
+        # Create bins for elevation bands i.e. from 1 to N where
+        #   N = (edge_max - edge_min) / elevation_band_resolution
+        #   For example --->
+        #   if edge_min, max and resolution = 2000m, 3000m and 50m respectively
+        #   then bin 1 encompasses cells from 2000m to 2050m
+        #   and bin 20 cells from 2950 to 3000m
+        id_dem = np.digitize(dem_clipped, self.elevation_edges) -1
+        id_dem = np.ndarray.astype(id_dem, np.uint8)
+        # get list (<numpy array>) of bin numbers (id_dem_unique)
+        id_dem_unique = np.unique(id_dem)
+        # initiate map of ids with nans max(id_dem) + 1
+        map_id_dem = np.full(dem_mask.shape, id_dem_unique[-1] + 1, dtype=np.uint8)
+        # places bin ids into map space (map_id_dem)
+        map_id_dem[dem_mask] = id_dem
+        return map_id_dem, id_dem_unique
+
     # @profile
     def flag_elevation_blocks(self, apply_moving_window, moving_window_size, neighbor_threshold, snowline_threshold, outlier_percentiles,
                     elevation_thresholding):
@@ -1058,62 +1092,78 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                     Percentiles used to threshold each elevation band.  i.e. 95 in (95,80,10,10) is the raw gain upper,
                                     which means anything greater than the 95th percentile of raw snow gain in each elevatin band will
                                     be flagged as an outlier.
+            elevation_thresholding:  string. A one or two item list indicating whether to
+                                     use diff and/or diff_norm to threshold the
+                                     elevation flags
         Output:
             flag_elevation_loss:  attribute
             flag_elevation_gain   attribute
         """
         print('entering flag_elevation_blocks')
-        # Masking bare ground areas because zero change in snow depth will skew distribution from which thresholds are based
-        dem_clip_masked = self.dem_clip[self.mask_nan_snow_present]
+
+        # Masking bare ground areas because zero change in snow depth will skew
+        # distribution from which thresholds are based
         mat_diff_norm_masked = self.mat_diff_norm[self.mask_nan_snow_present]
         mat_diff_masked = self.mat_diff[self.mask_nan_snow_present]
 
-        # Will need self.elevation_edges from snowline() if hypsometry has not been run yet
+        # Will need self.elevation_edges from snowline() if hypsometry has not
+        # been run yet
         if hasattr(self, 'snowline_elev'):
             pass
         else:
             self.snowline(snowline_threshold)
 
-        id_dem = np.digitize(dem_clip_masked, self.elevation_edges) -1  #creates bin edge ids.  the '-1' converts to index starting at zero
-        id_dem[id_dem == self.elevation_edges.shape[0]]  = self.elevation_edges.shape[0] - 1 #for some there are as many bins as edges.  this smooshes last bin(the max) into second to last bin edge
-        id_dem_unique = np.unique(id_dem)  #unique ids
-        map_id_dem = np.full(self.mask_nan_snow_present.shape, id_dem_unique[-1] + 1, dtype = np.uint8)  # makes nans max(id_dem) + 1
-        map_id_dem[self.mask_nan_snow_present] = id_dem
+        map_id_dem, id_dem_unique = self.get_elevation_bins('mask_nan_snow_present')
+
         map_id_dem_overlap = map_id_dem[self.mask_nan_snow_present]
 
         # Find threshold values per elevation band - 1D array
+        # Initiate numpy 1D arrays for these elevation bin statistics:
+            # 1) upper, lower and median outlier thresholds for snow depth
+            # 2) upper and lower outlier thresholds for normalized snow depth
+            # 3) elevation_count = bins per elevation band
         thresh_upper_norm = np.zeros(id_dem_unique.shape, dtype = np.float16)
         thresh_lower_norm = np.zeros(id_dem_unique.shape, dtype = np.float16)
         thresh_upper_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
         thresh_lower_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
         elevation_count = np.zeros(id_dem_unique.shape, dtype = np.int64)
+        median_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
         temp = mat_diff_norm_masked
         temp2 = mat_diff_masked
         temp3 = np.ones(temp2.shape, dtype = bool)
+        # save bin statistics per elevation bin to a numpy 1D Array i.e. list
         for id, id_dem_unique2 in enumerate(id_dem_unique):
             thresh_upper_raw[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[0])
             thresh_upper_norm[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[1])
             thresh_lower_raw[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[2])
             thresh_lower_norm[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[3])
+            median_raw[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2], 50)
             elevation_count[id] = getattr(temp3[map_id_dem_overlap == id_dem_unique2], 'sum')()
             # elevation_std[id] = getattr(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], 'std')()
 
-        # Place threshold values in appropriate elevation bin onto map - 2D array.  Used to find elevation based outliers
+        # Place threshold values onto map in appropriate elevation bin
+        # Used to find elevation based outliers
         thresh_upper_norm_array = np.zeros(self.mask_nan_snow_present.shape, dtype=np.float16)
         thresh_lower_norm_array = thresh_upper_norm_array.copy()
         thresh_upper_raw_array = thresh_upper_norm_array.copy()
         thresh_lower_raw_array = thresh_upper_norm_array.copy()
         for id, id_dem_unique2 in enumerate(id_dem_unique):
+            id_bin = map_id_dem == id_dem_unique2
             try:
-                thresh_upper_norm_array[map_id_dem == id_dem_unique2] = thresh_upper_norm[id]
-                thresh_upper_raw_array[map_id_dem == id_dem_unique2] = thresh_upper_raw[id]
-            except IndexError:
-                pass
+                thresh_upper_norm_array[id_bin] = thresh_upper_norm[id]
+                thresh_upper_raw_array[id_bin] = thresh_upper_raw[id]
+            except IndexError as e:
+                print(e)
             try:
-                thresh_lower_norm_array[map_id_dem == id_dem_unique2] = thresh_lower_norm[id]
-                thresh_lower_raw_array[map_id_dem == id_dem_unique2] = thresh_lower_raw[id]
-            except IndexError:
-                pass
+                thresh_lower_norm_array[id_bin] = thresh_lower_norm[id]
+                thresh_lower_raw_array[id_bin] = thresh_lower_raw[id]
+            except IndexError as e:
+                print(e)
+
+        # # this is used to calculate effect of flagged pixels
+        # if self.estimate_effect_flagged == True:
+        #     self.median_depth_elevation = median_raw.copy()
+        #     self.map_id_dem = map_id_dem
 
         # Combine outliers from mat_diff, mat_diff_norm or both mats accoring to UserConfig
         # Dictionary to translate values from UserConfig
@@ -1130,6 +1180,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
             temp_out_init = np.ones(shape = shape_temp, dtype = bool)
             elevation_flag_name = flag_options[i]
             for mat_name in elevation_thresholding[i]:
+                # this translates UserConfig name to name (string) used here:
+                # i.e. difference = mat_diff and vice/versa
                 mat_name = self.keys_master['config_to_mat_object'][mat_name]
                 diff_mat = getattr(self, mat_name)
                 elevation_thresh_array = keys_local[elevation_flag_name][mat_name]  # yields thresh_..._array
@@ -1149,19 +1201,18 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 setattr(self, keys_local[elevation_flag_name]['flag'], temp_out_init.copy())
 
         # Save dataframe of elevation band satistics on thresholds
-        elev_stack = self.elevation_edges[id_dem_unique -1].ravel()
         # Simply preparing the column names in a syntactically shittilly readable format:
-        column_names = ['elevation', '{}% change (m)', '{}% change (norm)', '{}% change (m)', '{}% change (norm)', 'elevation_count']
+        column_names = ['elevation', '{}% change (m)', '{}% change (norm)', '{}% change (m)', '{}% change (norm)', '50% change (m)', 'elevation_count']
         column_names_temp = []
         ct = 0
-        for id, names in enumerate(column_names):
+        for names in column_names:
             if '{}' in names:
                 names = names.format(str(outlier_percentiles[ct]))
                 ct += 1
             column_names_temp.append(names)
 
         temp = np.stack((self.elevation_edges[id_dem_unique], thresh_upper_raw.ravel(), thresh_upper_norm.ravel(),
-                thresh_lower_raw.ravel(), thresh_lower_norm.ravel(), elevation_count.ravel()), axis = -1)
+                thresh_lower_raw.ravel(), thresh_lower_norm.ravel(), median_raw.ravel(), elevation_count.ravel()), axis = -1)
         temp = np.around(temp, 2)
         df = pd.DataFrame(temp, columns = column_names_temp)
         df.to_csv(path_or_buf = self.file_path_out_csv, index=False)
@@ -1182,52 +1233,28 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                 first encountered
             veg_presence:       cells with vegetation height > 5m from the topo.nc file.
         """
-        # use overlap_nan mask for snowline because we want to get average snow per elevation band INCLUDING zero snow depth
-        dem_clip_conditional = self.dem_clip[self.mask_overlap_nan]
-        min_elev, max_elev = np.min(dem_clip_conditional), np. max(dem_clip_conditional)
 
-        # Sets dem bins edges to be evenly divisible by the elevation band rez
-        edge_min = min_elev % self.elevation_band_resolution
-        edge_min = min_elev - edge_min
-        edge_max = max_elev % self.elevation_band_resolution
-        edge_max = max_elev + (self.elevation_band_resolution - edge_max)
-        # creates elevation bin edges using min, max and elevation band resolution
-        self.elevation_edges = np.arange(edge_min, edge_max + 0.1, self.elevation_band_resolution)
-        # Create bins for elevation bands i.e. from 1 to N where
-        #   N = (edge_max - edge_min) / elevation_band_resolution
-        #   For example --->
-        #   if edge_min, max and resolution = 2000m, 3000m and 50m respectively
-        #   then bin 1 encompasses cells from 2000m to 2050m
-        #   and bin 20 cells from 2950 to 3000m
-        id_dem = np.digitize(dem_clip_conditional, self.elevation_edges) -1
-        id_dem = np.ndarray.astype(id_dem, np.uint8)
-        # get list (<numpy array>) of bin numbers (id_dem_unique)
-        id_dem_unique = np.unique(id_dem)
-        # initiate map of ids with nans max(id_dem) + 1
-        map_id_dem = np.full(self.mask_overlap_nan.shape, id_dem_unique[-1] + 1, dtype=np.uint8)
-        # places bin ids into map space (map_id_dem)
-        map_id_dem[self.mask_overlap_nan] = id_dem
+        map_id_dem, id_dem_unique = self.get_elevation_bins('mask_overlap_nan')
+
         # initiate lists (<numpy arrays>) used to determine snowline
         snowline_mean = np.full(id_dem_unique.shape, -9999, dtype = 'float')
-        snowline_std = np.full(id_dem_unique.shape, -9999, dtype = 'float')
         # use the matrix with the deepest mean basin snow depth to determine
         # snowline thresh,  assuming deeper avg basin snow = lower snowline
         if np.mean(self.mat_clip1[self.mask_overlap_nan]) > np.mean(self.mat_clip1[self.mask_overlap_nan]):
             #this uses date1 to find snowline
             mat_temp = self.mat_clip1
             mat = mat_temp[self.mask_overlap_nan]
-            mat_temp[self.mask_overlap_nan & mat_temp ]
         else:
             #this uses date2 to find snowline
             mat_temp = self.mat_clip2
             mat = mat_temp[self.mask_overlap_nan]
-        # Calculate mean & std for pixels with no nan (nans create errors)
+        # Calculate mean for pixels with no nan (nans create errors)
         # in each of the elevation bins
         map_id_dem2_masked = map_id_dem[self.mask_overlap_nan]
+        print(id_dem_unique)
         for id, id_dem_unique2 in enumerate(id_dem_unique):
             snowline_mean[id] = getattr(mat[map_id_dem2_masked == id_dem_unique2], 'mean')()
-            snowline_std[id] = getattr(mat[map_id_dem2_masked == id_dem_unique2], 'std')()
-        # Find elevation where snowline occurs
+        # Find SNOWLINE:  first elevation where snowline occurs
         id_min = np.min(np.where(snowline_mean > snowline_threshold))
         self.snowline_elev = self.elevation_edges[id_min]  #elevation of estimated snowline
 
