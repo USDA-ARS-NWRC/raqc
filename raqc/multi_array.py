@@ -12,6 +12,7 @@ import pandas as pd
 import json
 import affine
 from memory_profiler import profile
+from .utilities import prep_coords, increment_extents
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
@@ -132,70 +133,16 @@ class MultiArrayOverlap(object):
         of each (both snow dates, DEM, and Vegetation).
         """
 
-        with rio.open(self.file_path_dataset1) as src:
-            d1 = src
-            meta = d1.profile
+        topo_rez_same, self.extents_same, min_extents = prep_coords( \
+                self.file_path_dataset1, self.file_path_dataset2, \
+                self.file_path_topo, 'dem')
 
-        with rio.open(self.file_path_dataset2) as src:
-            d2 = src
-            meta2 = d2.profile
-            # self.d2 = d2
-
-        #formats string to open topo.nc file with rio.open
-        topo_file_open_rio = 'netcdf:{}:dem'.format(self.file_path_topo)
-        with rio.open(topo_file_open_rio) as src:
-            d3 = src
-            meta3 = d3.profile
-
-        #grab basics
-        # Note: This is the X Direction resolution.  We are assuming that X and Y
-        # resolutions, when rounded are the same
-        rez = meta['transform'][0]  # spatial resolution
-        rez2 = meta2['transform'][0]
-        rez3 = meta3['transform'][0]
-
-        # #find topo file info
-        # topo = Dataset(self.file_path_topo)
-        # x = topo.variables['x'][:]
-        # y = topo.variables['y'][:]
-        # # rez3 = x[1] - x[0]
-        # topo_extents = [None] * 4
-        # topo_extents[0], topo_extents[1], topo_extents[2], topo_extents[3] = \
-        #     x.min(), y.min(), x.max(), y.max()
-        # print('topo_extents ', topo_extents)
-
-        # .nc have different standards for spatial metadata than geotiff,
-        # At least the metadata derived in rasterio
-
-        d3_left = self.get_nc_bounds(d3.bounds.left, rez3, 'up')
-        d3_bottom = self.get_nc_bounds(d3.bounds.bottom, rez3, 'up')
-        d3_right = self.get_nc_bounds(d3.bounds.right, rez3, 'down')
-        d3_top = self.get_nc_bounds(d3.bounds.top, rez3, 'down')
-
-        # check that date1 and date2 spatial resolutions are the same.
-        if round(rez) == round(rez2):  #hack way to check all three rez the same
-            pass
-        else:
-            sys.exit("check that spatial resolution of your two repeat array \
-            files are the same must fix and try again")
-        if round(rez) == round(rez3):
-            topo_rez_same = True
-        else:
-            topo_rez_same = False
-
-        # Seemingly wierd but necessary and simple way to check if bounds
-        # of both dates AND topo are the same.
-        # Rio...disjoint_bounds ONLY ACCEPTS two args, hence the if statements
-        # to hack effectly add 3rd argument.
-        # result of rio...disjoint_bounds is True if different, False is same
-        extents_same = ~ rio.coords.disjoint_bounds(d2.bounds, d1.bounds)
-        if extents_same:
-            extents_same2 = rio.coords.disjoint_bounds(d1.bounds, d3.bounds)
-            self.extents_same = extents_same2 # True or False
-        else:
-            self.extents_same = extents_same  # False
-
+        # Save JSON
         # save metadata of original date2 to json txt file
+        # date1 or date2 should both work?  Vestige from when date mattered..
+        with rio.open(self.file_path_dataset2) as src:
+            meta2 = src.profile
+
         with open(self.file_path_out_json, 'w') as outfile:
             json_dict = dict({k:v for k, v in meta2.items() if k != 'crs'})
             # convert crs to integer.
@@ -204,19 +151,6 @@ class MultiArrayOverlap(object):
             crs_object = rio.crs.CRS.to_epsg(meta2['crs'])
             json_dict.update({'crs' : crs_object})
             json.dump(json_dict, outfile)
-
-        # grab bounds of common/overlapping extent of date1, date2 and topo.nc
-        # and prepare function call for gdal to clip to extent and align
-        left_max_bound = max(d1.bounds.left, d2.bounds.left, d3_left)
-        bottom_max_bound = max(d1.bounds.bottom, d2.bounds.bottom, d3_bottom)
-        right_min_bound =  min(d1.bounds.right, d2.bounds.right, d3_right)
-        top_min_bound = min(d1.bounds.top, d2.bounds.top, d3_top)
-
-        # ensure nothing after decimal - nice whole number, admittedly a float
-        left_max_bound = self.increment_extents(left_max_bound, rez2, 'up')
-        bottom_max_bound = self.increment_extents(bottom_max_bound, rez2, 'up')
-        right_min_bound = self.increment_extents(right_min_bound, rez2, 'down')
-        top_min_bound = self.increment_extents(top_min_bound, rez2, 'down')
 
         # Create file paths and names
         file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
@@ -281,22 +215,19 @@ class MultiArrayOverlap(object):
         if not self.extents_same:
             # if date1, date2 and topo have different extents  ---> clip
             run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                        (left_max_bound, bottom_max_bound, right_min_bound, top_min_bound, \
-                        self.file_path_dataset1, file_path_date1_te) + ' -overwrite'
+                        (*min_extents, self.file_path_dataset1, \
+                        file_path_date1_te) + ' -overwrite'
 
             run_arg3 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                        (left_max_bound, bottom_max_bound, right_min_bound, \
-                        top_min_bound, self.file_path_dataset2, file_path_date2_te) \
+                        (*min_extents, self.file_path_dataset2, file_path_date2_te) \
                         + ' -overwrite'
 
             run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                        (left_max_bound, bottom_max_bound, right_min_bound, \
-                        top_min_bound, self.file_name_base + '_dem.tif', \
+                        (*min_extents, self.file_name_base + '_dem.tif', \
                         self.file_name_base + '_dem_common_extent.tif -overwrite')
 
             run_arg4b = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format( \
-                        left_max_bound, bottom_max_bound, right_min_bound, \
-                        top_min_bound, self.file_name_base + '_veg_height.tif', \
+                        *min_extents, self.file_name_base + '_veg_height.tif', \
                         self.file_name_base + '_veg_height_common_extent.tif -overwrite')
 
         else:
@@ -498,10 +429,10 @@ class MultiArrayOverlap(object):
 
             rez = d_orig['resolution']
             bounds_date2 = [None] * 4
-            bounds_date2[0] = self.increment_extents(d_orig['left'], rez, 'up')
-            bounds_date2[1] = self.increment_extents(d_orig['bottom'], rez, 'up')
-            bounds_date2[2] = self.increment_extents(d_orig['right'], rez, 'down')
-            bounds_date2[3] = self.increment_extents(d_orig['top'], rez, 'down')
+            bounds_date2[0] = increment_extents(d_orig['left'], rez, 'up')
+            bounds_date2[1] = increment_extents(d_orig['bottom'], rez, 'up')
+            bounds_date2[2] = increment_extents(d_orig['right'], rez, 'down')
+            bounds_date2[3] = increment_extents(d_orig['top'], rez, 'down')
 
             buffer={}
             # Notice '*-1'.  Those ensure subsetting flag array into nan array
@@ -712,24 +643,24 @@ class MultiArrayOverlap(object):
                 keyed_list.append(val)
         return(keyed_list)
 
-    def increment_extents(self, coord, rez, up_down):
-        """
-         See** needs tweaks to work reliable with resolutions (rez) < 2
-        """
-
-        # ** limitation mentioned in docstring
-
-        coord_round = round(coord) % round(rez)
-        if coord_round != 0:
-            if coord_round > 0.5 * rez:
-                coord_updated = coord + (round(rez) - (coord % round(rez)))
-            else:
-                coord_updated = coord - (coord % round(rez))
-        else:
-            coord_updated = coord
-        print('coord, ', coord)
-        print('coord_updated, ', coord_updated)
-        return(coord_updated)
+    # def increment_extents(self, coord, rez, up_down):
+    #     """
+    #      See** needs tweaks to work reliable with resolutions (rez) < 2
+    #     """
+    #
+    #     # ** limitation mentioned in docstring
+    #
+    #     coord_round = round(coord) % round(rez)
+    #     if coord_round != 0:
+    #         if coord_round > 0.5 * rez:
+    #             coord_updated = coord + (round(rez) - (coord % round(rez)))
+    #         else:
+    #             coord_updated = coord - (coord % round(rez))
+    #     else:
+    #         coord_updated = coord
+    #     print('coord, ', coord)
+    #     print('coord_updated, ', coord_updated)
+    #     return(coord_updated)
 
     def update_meta_from_json(self):
         """
@@ -775,14 +706,14 @@ class MultiArrayOverlap(object):
         self.orig_shape = tuple(orig_shape)
         return(dataset_orig)
 
-    def get_nc_bounds(self, extent, rez, down_up):
-        print('extent in', extent)
-        if down_up == 'down':
-            extent = extent - rez / 2
-        if down_up == 'up':
-            extent = extent + rez / 2
-        print('extent returned ', extent)
-        return(extent)
+    # def get_nc_bounds(self, extent, rez, down_up):
+    #     print('extent in', extent)
+    #     if down_up == 'down':
+    #         extent = extent - rez / 2
+    #     if down_up == 'up':
+    #         extent = extent + rez / 2
+    #     print('extent returned ', extent)
+    #     return(extent)
 
     def trim_extent_nan(self, name):
         """Used to trim path and rows from array edges with na values.
