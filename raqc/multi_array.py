@@ -12,7 +12,7 @@ import pandas as pd
 import json
 import affine
 from memory_profiler import profile
-from .utilities import prep_coords, increment_extents
+from .utilities import prep_coords, get_elevation_bins, evenly_divisible_extents
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
@@ -219,8 +219,8 @@ class MultiArrayOverlap(object):
                         file_path_date1_te) + ' -overwrite'
 
             run_arg3 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                        (*min_extents, self.file_path_dataset2, file_path_date2_te) \
-                        + ' -overwrite'
+                        (*min_extents, self.file_path_dataset2, \
+                        file_path_date2_te) + ' -overwrite'
 
             run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
                         (*min_extents, self.file_name_base + '_dem.tif', \
@@ -412,40 +412,31 @@ class MultiArrayOverlap(object):
         # get extents and resolution from json and determine if originally clipped
         d_orig = self.derive_dataset('d2_te')
 
-        # # determine if "clipped" version was actually clipped i.e. diff extents
-        # if not self.extents_same:
-        #     #was clipped
-        #     self.disjoint_bounds = True
-        # else:
-        #     # did not need clipping
-        #     self.disjoint_bounds = False
-
         #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
-        # if self.disjoint_bounds:
-        if not self.extents_same:
-            bounds_date2_te = [None] * 4
-            bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, self.d2_te.bounds.bottom
-            bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.right, self.d2_te.bounds.top
 
-            rez = d_orig['resolution']
-            bounds_date2 = [None] * 4
-            bounds_date2[0] = increment_extents(d_orig['left'], rez, 'up')
-            bounds_date2[1] = increment_extents(d_orig['bottom'], rez, 'up')
-            bounds_date2[2] = increment_extents(d_orig['right'], rez, 'down')
-            bounds_date2[3] = increment_extents(d_orig['top'], rez, 'down')
+        bounds_date2_te = [None] * 4
+        bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, self.d2_te.bounds.bottom
+        bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.right, self.d2_te.bounds.top
 
-            buffer={}
-            # Notice '*-1'.  Those ensure subsetting flag array into nan array
-            # buffers -<buffer> on right and bottom, and +<buffer> top and left
-            buffer.update({'left' : round((bounds_date2[0] - bounds_date2_te[0]) / rez) * -1})
-            buffer.update({'bottom' : round((bounds_date2[1] - bounds_date2_te[1]) / rez)})
-            buffer.update({'right' : round((bounds_date2[2] - bounds_date2_te[2]) / rez) * -1})
-            buffer.update({'top' : round((bounds_date2[3] - bounds_date2_te[3]) / rez)})
-            for k, v in buffer.items():
-                if v == 0:
-                    buffer[k] = None
-            self.buffer = buffer
-            print(buffer)
+        rez = d_orig['resolution']
+        bounds_date2 = [None] * 4
+        bounds_date2[0] = evenly_divisible_extents(d_orig['left'], rez)
+        bounds_date2[2] = evenly_divisible_extents(d_orig['right'], rez)
+        bounds_date2[1] = evenly_divisible_extents(d_orig['bottom'], rez)
+        bounds_date2[3] = evenly_divisible_extents(d_orig['top'], rez)
+
+        buffer={}
+        # Notice '*-1'.  Those ensure subsetting flag array into nan array
+        # buffers -<buffer> on right and bottom, and +<buffer> top and left
+        buffer.update({'left' : round((bounds_date2[0] - bounds_date2_te[0]) / rez) * -1})
+        buffer.update({'bottom' : round((bounds_date2[1] - bounds_date2_te[1]) / rez)})
+        buffer.update({'right' : round((bounds_date2[2] - bounds_date2_te[2]) / rez) * -1})
+        buffer.update({'top' : round((bounds_date2[3] - bounds_date2_te[3]) / rez)})
+        for k, v in buffer.items():
+            if v == 0:
+                buffer[k] = None
+        self.buffer = buffer
+        print(buffer)
     def save_tiff(self, fname, flags, include_arrays, include_masks):
         """
         Saves up to two geotiffs using RasterIO basically.  One tiff will be the
@@ -467,9 +458,6 @@ class MultiArrayOverlap(object):
         """
 
         tick = time.clock()
-
-        # determine if clipping occured
-        self.determine_if_extents_changed()
 
         # now that calculations complete (i.e. self.mat_diff > 1), set -9999 to nan
         self.mat_diff[~self.mask_nan_snow_present] = np.nan
@@ -509,6 +497,7 @@ class MultiArrayOverlap(object):
 
         # if self.disjoint_bounds:
         if not self.extents_same:
+            self.determine_if_extents_changed()
             buffer = self.buffer
             # buffer flag arrays with nans to fit original date2 array shape
             # nan = <uint> 255
@@ -545,13 +534,14 @@ class MultiArrayOverlap(object):
             for array in include_arrays:
                 array_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
 
-            buffer = self.buffer
-            for id, band in enumerate(array_names):
-                array_buffer = np.full(self.orig_shape, -9999, dtype = 'float32')
-                mat_temp = getattr(self, band)
-                array_buffer[buffer['top'] : buffer['bottom'], \
-                            buffer['left'] : buffer['right']] = mat_temp
-                setattr(self, band, array_buffer)
+            if not self.extents_same:
+                buffer = self.buffer
+                for id, band in enumerate(array_names):
+                    array_buffer = np.full(self.orig_shape, -9999, dtype = 'float32')
+                    mat_temp = getattr(self, band)
+                    array_buffer[buffer['top'] : buffer['bottom'], \
+                                buffer['left'] : buffer['right']] = mat_temp
+                    setattr(self, band, array_buffer)
 
             # finally, change abbreviated object names to verbose, intuitive names
             band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
@@ -967,37 +957,37 @@ class Flags(MultiArrayOverlap, PatternFilters):
             self.flag_basin_loss = basin_loss
             self.flag_basin_gain = basin_gain
 
-    def get_elevation_bins(self, dem_mask_name):
-        # use overlap_nan mask for snowline because we want to get average
-        # snow per elevation band INCLUDING zero snow depth
-        dem_mask = getattr(self, dem_mask_name)
-        dem_clipped = self.dem_clip[dem_mask]
-        min_elev, max_elev = np.min(dem_clipped), np. max(dem_clipped)
-
-        # Sets dem bins edges to be evenly divisible by the elevation band rez
-        edge_min = min_elev % self.elevation_band_resolution
-        edge_min = min_elev - edge_min
-        edge_max = max_elev % self.elevation_band_resolution
-        edge_max = max_elev + (self.elevation_band_resolution - edge_max)
-        # creates elevation bin edges using min, max and elevation band resolution
-        self.elevation_edges = np.arange(edge_min, edge_max + 0.1, \
-                                        self.elevation_band_resolution)
-        print('bin edges ', self.elevation_edges)
-        # Create bins for elevation bands i.e. from 1 to N where
-        #   N = (edge_max - edge_min) / elevation_band_resolution
-        #   For example --->
-        #   if edge_min, max and resolution = 2000m, 3000m and 50m respectively
-        #   then bin 1 encompasses cells from 2000m to 2050m
-        #   and bin 20 cells from 2950 to 3000m
-        id_dem = np.digitize(dem_clipped, self.elevation_edges) -1
-        id_dem = np.ndarray.astype(id_dem, np.uint8)
-        # get list (<numpy array>) of bin numbers (id_dem_unique)
-        id_dem_unique = np.unique(id_dem)
-        # initiate map of ids with nans max(id_dem) + 1
-        map_id_dem = np.full(dem_mask.shape, id_dem_unique[-1] + 1, dtype=np.uint8)
-        # places bin ids into map space (map_id_dem)
-        map_id_dem[dem_mask] = id_dem
-        return map_id_dem, id_dem_unique
+    # def get_elevation_bins(self, dem_mask_name):
+    #     # use overlap_nan mask for snowline because we want to get average
+    #     # snow per elevation band INCLUDING zero snow depth
+    #     dem_mask = getattr(self, dem_mask_name)
+    #     dem_clipped = self.dem_clip[dem_mask]
+    #     min_elev, max_elev = np.min(dem_clipped), np. max(dem_clipped)
+    #
+    #     # Sets dem bins edges to be evenly divisible by the elevation band rez
+    #     edge_min = min_elev % self.elevation_band_resolution
+    #     edge_min = min_elev - edge_min
+    #     edge_max = max_elev % self.elevation_band_resolution
+    #     edge_max = max_elev + (self.elevation_band_resolution - edge_max)
+    #     # creates elevation bin edges using min, max and elevation band resolution
+    #     elevation_edges = np.arange(edge_min, edge_max + 0.1, \
+    #                                     self.elevation_band_resolution)
+    #     print('bin edges ', elevation_edges)
+    #     # Create bins for elevation bands i.e. from 1 to N where
+    #     #   N = (edge_max - edge_min) / elevation_band_resolution
+    #     #   For example --->
+    #     #   if edge_min, max and resolution = 2000m, 3000m and 50m respectively
+    #     #   then bin 1 encompasses cells from 2000m to 2050m
+    #     #   and bin 20 cells from 2950 to 3000m
+    #     id_dem = np.digitize(dem_clipped, elevation_edges) -1
+    #     id_dem = np.ndarray.astype(id_dem, np.uint8)
+    #     # get list (<numpy array>) of bin numbers (id_dem_unique)
+    #     id_dem_unique = np.unique(id_dem)
+    #     # initiate map of ids with nans max(id_dem) + 1
+    #     map_id_dem = np.full(dem_mask.shape, id_dem_unique[-1] + 1, dtype=np.uint8)
+    #     # places bin ids into map space (map_id_dem)
+    #     map_id_dem[dem_mask] = id_dem
+    #     return map_id_dem, id_dem_unique, elevation_edges
 
     # @profile
     def flag_elevation_blocks(self, apply_moving_window, moving_window_size, neighbor_threshold, snowline_threshold, outlier_percentiles,
@@ -1044,7 +1034,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
         else:
             self.snowline(snowline_threshold)
 
-        map_id_dem, id_dem_unique = self.get_elevation_bins('mask_nan_snow_present')
+        map_id_dem, id_dem_unique, elevation_edges = \
+            get_elevation_bins(self.dem_clip, self.mask_nan_snow_present, \
+                                self.elevation_band_resolution)
 
         map_id_dem_overlap = map_id_dem[self.mask_nan_snow_present]
 
@@ -1142,7 +1134,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 ct += 1
             column_names_temp.append(names)
 
-        temp = np.stack((self.elevation_edges[id_dem_unique], thresh_upper_raw.ravel(), thresh_upper_norm.ravel(),
+        temp = np.stack((elevation_edges[id_dem_unique], thresh_upper_raw.ravel(), thresh_upper_norm.ravel(),
                 thresh_lower_raw.ravel(), thresh_lower_norm.ravel(), median_raw.ravel(), elevation_count.ravel()), axis = -1)
         temp = np.around(temp, 2)
         df = pd.DataFrame(temp, columns = column_names_temp)
@@ -1165,7 +1157,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
             veg_presence:       cells with vegetation height > 5m from the topo.nc file.
         """
 
-        map_id_dem, id_dem_unique = self.get_elevation_bins('mask_overlap_nan')
+        map_id_dem, id_dem_unique, elevation_edges = \
+            get_elevation_bins(self.dem_clip, self.mask_overlap_nan, \
+                                self.elevation_band_resolution)
 
         # initiate lists (<numpy arrays>) used to determine snowline
         snowline_mean = np.full(id_dem_unique.shape, -9999, dtype = 'float')
@@ -1187,7 +1181,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
             snowline_mean[id] = getattr(mat[map_id_dem2_masked == id_dem_unique2], 'mean')()
         # Find SNOWLINE:  first elevation where snowline occurs
         id_min = np.min(np.where(snowline_mean > snowline_threshold))
-        self.snowline_elev = self.elevation_edges[id_min]  #elevation of estimated snowline
+        self.snowline_elev = elevation_edges[id_min]  #elevation of estimated snowline
 
         # Open veg layer from topo.nc and identify pixels with veg present (veg_height > 5)
         with rio.open(self.file_name_base + '_veg_height_common_extent.tif') as src:

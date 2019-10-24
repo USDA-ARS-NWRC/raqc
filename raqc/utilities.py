@@ -1,14 +1,28 @@
 import rasterio as rio
 import time
+import numpy as np
 
 def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
+    """
+    Puts coordinates of all files into exact same extent and spatial resolution
 
-    tick = time.clock()
+    Args:
+        file_path_dataset1:     file path to dataset of first date
+        file_path_dataset1:     file path to dataset of second date
+        file_path_topo:         file path to topo.nc file
+        band:                   string with band name to use in .nc file
+    Returns
+        topo_rez_same:      boolean indicating if the topo.nc file has same spatial
+                            resolution as the datasets
+        extents_same:       boolean indicating if the extents of datasets and topo
+                            are the same
+        min_extents:        list with minimum overlapping extents of the 3 datasets
+    """
+
     with rio.open(file_path_dataset1) as src:
         d1 = src
         meta = d1.profile
     tock = time.clock()
-    print(tock - tick)
 
     with rio.open(file_path_dataset2) as src:
         d2 = src
@@ -52,10 +66,10 @@ def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
 
     # .nc have different standards for spatial metadata than geotiff,
     # At least the metadata pulled from rasterio
-    d3_left = get_nc_bounds(d3.bounds.left, rez3, 'up')
-    d3_bottom = get_nc_bounds(d3.bounds.bottom, rez3, 'up')
-    d3_right = get_nc_bounds(d3.bounds.right, rez3, 'down')
-    d3_top = get_nc_bounds(d3.bounds.top, rez3, 'down')
+    d3_left = bounds_to_pix_coords(d3.bounds.left, rez3, 'left')
+    d3_bottom = bounds_to_pix_coords(d3.bounds.bottom, rez3, 'bottom')
+    d3_right = bounds_to_pix_coords(d3.bounds.right, rez3, 'right')
+    d3_top = bounds_to_pix_coords(d3.bounds.top, rez3, 'top')
 
 
     # grab bounds of common/overlapping extent of date1, date2 and topo.nc
@@ -66,18 +80,32 @@ def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
     top_min_bound = min(d1.bounds.top, d2.bounds.top, d3_top)
 
     # ensure nothing after decimal - nice whole number, admittedly a float
-    left_max_bound = increment_extents(left_max_bound, rez2, 'up')
-    bottom_max_bound = increment_extents(bottom_max_bound, rez2, 'up')
-    right_min_bound = increment_extents(right_min_bound, rez2, 'down')
-    top_min_bound = increment_extents(top_min_bound, rez2, 'down')
+    left_max_bound = evenly_divisible_extents(left_max_bound, rez2)
+    bottom_max_bound = evenly_divisible_extents(bottom_max_bound, rez2)
+    right_min_bound = evenly_divisible_extents(right_min_bound, rez2)
+    top_min_bound = evenly_divisible_extents(top_min_bound, rez2)
 
     min_extents = [left_max_bound, bottom_max_bound, right_min_bound, \
                             top_min_bound]
 
     return topo_rez_same, extents_same, min_extents
 
-def increment_extents(coord, rez, up_down):
+def evenly_divisible_extents(coord, rez):
     """
+    This utility rectifies coordinates in geographically referenced datasets for
+    simpler use when identical extents and spatial resolutions are required.  In
+    RAQC multiple geotiffs and/or netCDF files are aligned with each other.  This
+    utility rounds dataset extents of each file to coordinates evenly divisible
+    by the spatial resolution.  The spatial resolution will also be rounded to
+    nearest integer.
+
+    Arguments
+    coord: coordinate (int or float)
+    rez:    spatial resolution i.e. 50m
+    Returns
+    coord_updated:  coordinate rounded to nearest multiple of rounded resolution.
+                        ex) evenly_divisible_extents(2026, 49.99) returns 2050.
+                            If coord = 2024 instead, 2000 returned
      See** needs tweaks to work reliable with resolutions (rez) < 2
     """
 
@@ -95,11 +123,87 @@ def increment_extents(coord, rez, up_down):
     print('coord_updated, ', coord_updated)
     return(coord_updated)
 
-def get_nc_bounds(extent, rez, down_up):
-    print('extent in', extent)
-    if down_up == 'down':
-        extent = extent - rez / 2
-    if down_up == 'up':
-        extent = extent + rez / 2
-    print('extent returned ', extent)
-    return(extent)
+def bounds_to_pix_coords(bound, rez, location):
+    """
+    Rectifies possible quarks using rasterio, namely that <dataset>.bounds
+    outputs exterior bounding box of dataset, NOT the pixel locations.
+    May need more investigation, but works when matching netCDF to geotiff
+    coordinates using Rasterio
+
+    Arguments
+    bound:      bounding box extents from rasterio dataset of .nc file
+    rez:        spatial resolution
+    location:   left, right, top, or bottom bounding coordinates
+
+    Returns:
+    bound_new:  correct pixel coordinates for bounds
+    """
+
+    print('bound in', bound)
+    # dictionary converts key into string of 'out' or 'in' for shifting bounds
+    # in or out
+    dict_offset_coords = {'left':'out', 'right':'in', 'bottom':'out', 'top':'in'}
+    location = dict_offset_coords[location]
+    if location == 'in':
+        bound_new = bound - rez / 2
+    if location == 'out':
+        bound_new = bound + rez / 2
+    print('bound returned ', bound_new)
+    return(bound_new)
+
+def rasterio_netCDF(file_path):
+    """
+    A quick standalone demonstration on what rasterio vs. netCDF4 provides in
+    terms of bounds.
+    """
+    from netCDF4 import Dataset
+    from tabulate import tabulate
+
+    ncfile = Dataset(file_path, 'r')
+    lats = ncfile.variables['y']
+    lons = ncfile.variables['x']
+    netCDF_row = ['netCDF4', lons[0], lons[-1], lats[-1], lats[0]]
+
+    topo_file_open_rio = 'netcdf:{0}:{1}'.format(file_path, 'dem')
+    with rio.open(topo_file_open_rio) as src:
+        d1 = src
+        meta = d1.profile
+
+    rio_row = ['rasterio', d1.bounds.left, d1.bounds.right, d1.bounds.bottom, d1.bounds.top]
+    list_list = [netCDF_row, rio_row]
+    col_names = ['', 'left', 'right', 'bottom', 'top']
+    print('bounds from both')
+    print('\n',tabulate(list_list, headers = col_names, floatfmt = ".1f"), '\n')
+    print(type(d1.bounds))
+
+def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
+    # use overlap_nan mask for snowline because we want to get average
+    # snow per elevation band INCLUDING zero snow depth
+
+    dem_clipped = dem[dem_mask]
+    min_elev, max_elev = np.min(dem_clipped), np. max(dem_clipped)
+
+    # Sets dem bins edges to be evenly divisible by the elevation band rez
+    edge_min = min_elev % elevation_band_resolution
+    edge_min = min_elev - edge_min
+    edge_max = max_elev % elevation_band_resolution
+    edge_max = max_elev + (elevation_band_resolution - edge_max)
+    # creates elevation bin edges using min, max and elevation band resolution
+    elevation_edges = np.arange(edge_min, edge_max + 0.1, \
+                                    elevation_band_resolution)
+    print('bin edges ', elevation_edges)
+    # Create bins for elevation bands i.e. from 1 to N where
+    #   N = (edge_max - edge_min) / elevation_band_resolution
+    #   For example --->
+    #   if edge_min, max and resolution = 2000m, 3000m and 50m respectively
+    #   then bin 1 encompasses cells from 2000m to 2050m
+    #   and bin 20 cells from 2950 to 3000m
+    id_dem = np.digitize(dem_clipped, elevation_edges) -1
+    id_dem = np.ndarray.astype(id_dem, np.uint8)
+    # get list (<numpy array>) of bin numbers (id_dem_unique)
+    id_dem_unique = np.unique(id_dem)
+    # initiate map of ids with nans max(id_dem) + 1
+    map_id_dem = np.full(dem_mask.shape, id_dem_unique[-1] + 1, dtype=np.uint8)
+    # places bin ids into map space (map_id_dem)
+    map_id_dem[dem_mask] = id_dem
+    return map_id_dem, id_dem_unique, elevation_edges
