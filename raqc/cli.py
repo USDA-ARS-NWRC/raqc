@@ -166,6 +166,7 @@ def main():
         logic = [tree_loss, tree_gain]
         raqc_obj.flag_tree_blocks(logic)
 
+    raqc_obj.effect_flags()
     want_plot = cfg['options']['plot']
     raqc_obj.plot_this(want_plot)
 

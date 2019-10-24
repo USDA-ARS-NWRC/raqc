@@ -293,12 +293,14 @@ class MultiArrayOverlap(object):
 
         config_to_mat_object = {'date1' : 'mat_clip1', 'date2' : 'mat_clip2',
                                 'difference_normalized' : 'mat_diff_norm',
-                                'difference' : 'mat_diff', 'date1_nan' : 'date1_nan'}
+                                'difference' : 'mat_diff', 'date1_nan' : 'date1_nan',
+                                'mat_diff_flags_to_median' : 'mat_diff_flags_to_median'}
 
         mat_object_to_tif =     {'mat_clip1' : 'depth_{0}'.format(self.date1_string),
                                 'mat_clip2' : 'depth_{0}'.format(self.date2_string),
                                 'mat_diff_norm' : 'difference_normalized',
-                                'mat_diff' : 'difference'}
+                                'mat_diff' : 'difference',
+                                'mat_diff_flags_to_median' : 'mat_diff_flags_to_median'}
 
         #COMBINE dictionaries into NESTED dictionary
         self.keys_master = {'operators' : operators,
@@ -462,6 +464,7 @@ class MultiArrayOverlap(object):
         # now that calculations complete (i.e. self.mat_diff > 1), set -9999 to nan
         self.mat_diff[~self.mask_nan_snow_present] = np.nan
         self.mat_diff_norm[~self.mask_nan_snow_present] = np.nan
+        self.mat_diff_flags_to_median[~self.mask_nan_snow_present] = np.nan
         self.mat_clip1 = np.ndarray.astype(self.mat_clip1, np.float32)
         self.mat_clip2 = np.ndarray.astype(self.mat_clip2, np.float32)
         self.mat_clip1[self.mat_clip1 == -9999] = np.nan
@@ -554,8 +557,6 @@ class MultiArrayOverlap(object):
 
             with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
                 for id, band in enumerate(array_names, start = 1):
-                    print('array_names ', array_names)
-                    print('array_names[id-1] ', array_names[id-1])
                     print('band ', band)
                     # try:
                     #     print('which arrays: ', array_names[id - 1])
@@ -633,25 +634,6 @@ class MultiArrayOverlap(object):
                 keyed_list.append(val)
         return(keyed_list)
 
-    # def increment_extents(self, coord, rez, up_down):
-    #     """
-    #      See** needs tweaks to work reliable with resolutions (rez) < 2
-    #     """
-    #
-    #     # ** limitation mentioned in docstring
-    #
-    #     coord_round = round(coord) % round(rez)
-    #     if coord_round != 0:
-    #         if coord_round > 0.5 * rez:
-    #             coord_updated = coord + (round(rez) - (coord % round(rez)))
-    #         else:
-    #             coord_updated = coord - (coord % round(rez))
-    #     else:
-    #         coord_updated = coord
-    #     print('coord, ', coord)
-    #     print('coord_updated, ', coord_updated)
-    #     return(coord_updated)
-
     def update_meta_from_json(self):
         """
         manually add add 'transform' key to metadata.
@@ -695,15 +677,6 @@ class MultiArrayOverlap(object):
         orig_shape.extend([round((top - bottom)/rez), round((right - left)/rez)])
         self.orig_shape = tuple(orig_shape)
         return(dataset_orig)
-
-    # def get_nc_bounds(self, extent, rez, down_up):
-    #     print('extent in', extent)
-    #     if down_up == 'down':
-    #         extent = extent - rez / 2
-    #     if down_up == 'up':
-    #         extent = extent + rez / 2
-    #     print('extent returned ', extent)
-    #     return(extent)
 
     def trim_extent_nan(self, name):
         """Used to trim path and rows from array edges with na values.
@@ -957,38 +930,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
             self.flag_basin_loss = basin_loss
             self.flag_basin_gain = basin_gain
 
-    # def get_elevation_bins(self, dem_mask_name):
-    #     # use overlap_nan mask for snowline because we want to get average
-    #     # snow per elevation band INCLUDING zero snow depth
-    #     dem_mask = getattr(self, dem_mask_name)
-    #     dem_clipped = self.dem_clip[dem_mask]
-    #     min_elev, max_elev = np.min(dem_clipped), np. max(dem_clipped)
-    #
-    #     # Sets dem bins edges to be evenly divisible by the elevation band rez
-    #     edge_min = min_elev % self.elevation_band_resolution
-    #     edge_min = min_elev - edge_min
-    #     edge_max = max_elev % self.elevation_band_resolution
-    #     edge_max = max_elev + (self.elevation_band_resolution - edge_max)
-    #     # creates elevation bin edges using min, max and elevation band resolution
-    #     elevation_edges = np.arange(edge_min, edge_max + 0.1, \
-    #                                     self.elevation_band_resolution)
-    #     print('bin edges ', elevation_edges)
-    #     # Create bins for elevation bands i.e. from 1 to N where
-    #     #   N = (edge_max - edge_min) / elevation_band_resolution
-    #     #   For example --->
-    #     #   if edge_min, max and resolution = 2000m, 3000m and 50m respectively
-    #     #   then bin 1 encompasses cells from 2000m to 2050m
-    #     #   and bin 20 cells from 2950 to 3000m
-    #     id_dem = np.digitize(dem_clipped, elevation_edges) -1
-    #     id_dem = np.ndarray.astype(id_dem, np.uint8)
-    #     # get list (<numpy array>) of bin numbers (id_dem_unique)
-    #     id_dem_unique = np.unique(id_dem)
-    #     # initiate map of ids with nans max(id_dem) + 1
-    #     map_id_dem = np.full(dem_mask.shape, id_dem_unique[-1] + 1, dtype=np.uint8)
-    #     # places bin ids into map space (map_id_dem)
-    #     map_id_dem[dem_mask] = id_dem
-    #     return map_id_dem, id_dem_unique, elevation_edges
-
     # @profile
     def flag_elevation_blocks(self, apply_moving_window, moving_window_size, neighbor_threshold, snowline_threshold, outlier_percentiles,
                     elevation_thresholding):
@@ -1224,9 +1165,36 @@ class Flags(MultiArrayOverlap, PatternFilters):
             elif logic == 'elevation':
                 setattr(self, tree_flag_name, temp_elevation & self.veg_presence)
 
-                # self.flag_tree_loss = (self.flag_basin_loss | self.flag_elevation_loss) & self.veg_presence
-        # self.flag_tree_gain = (self.flag_basin_gain | self.flag_elevation_gain) & self.veg_presence
-    # def __repr__()
-    # (self):
-    #         return ("Main items of use are matrices clipped to each other's extent and maps of outlier flags \
-    #                 Also capable of saving geotiffs and figures")
+    def effect_flags(self):
+        map_id_dem, id_dem_unique, elevation_edges = \
+            get_elevation_bins(self.dem_clip, self.mask_nan_snow_present, \
+                                self.elevation_band_resolution)
+
+        flags = self.flag_elevation_gain
+        mat_diff = self.mat_diff.copy()
+        mask_temp = self.mask_nan_snow_present & ~flags
+        mat_diff_clip = mat_diff[mask_temp]
+        map_id_dem_clip = map_id_dem[mask_temp]
+
+        median_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
+        # save bin statistics per elevation bin to a numpy 1D Array i.e. list
+        for id, id_dem_unique2 in enumerate(id_dem_unique):
+            median_raw[id] = np.percentile(mat_diff_clip[map_id_dem_clip == \
+                                                        id_dem_unique2], 50)
+
+        # Place threshold values onto map in appropriate elevation bin
+        # Used to find elevation based outliers
+        thresh_median_array = np.zeros(mat_diff.shape, dtype=np.float16)
+        for id, id_dem_unique2 in enumerate(id_dem_unique):
+            id_bin = map_id_dem == id_dem_unique2
+            try:
+                thresh_median_array[id_bin] = median_raw[id]
+            except IndexError as e:
+                print(e)
+
+        mat_diff_flags_to_median = mat_diff.copy()
+        mat_diff_flags_to_median[flags] = thresh_median_array[flags]
+        sum1 = np.sum(np.ndarray.astype(mat_diff[self.mask_nan_snow_present], np.double))
+        sum2 = np.sum(np.ndarray.astype(mat_diff_flags_to_median[self.mask_nan_snow_present], np.double))
+        print('delta ', (sum1 - sum2) / sum1)
+        self.mat_diff_flags_to_median = mat_diff_flags_to_median
