@@ -13,6 +13,8 @@ import json
 import affine
 from memory_profiler import profile
 from .utilities import prep_coords, get_elevation_bins, evenly_divisible_extents
+from tabulate import tabulate
+
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
@@ -294,13 +296,14 @@ class MultiArrayOverlap(object):
         config_to_mat_object = {'date1' : 'mat_clip1', 'date2' : 'mat_clip2',
                                 'difference_normalized' : 'mat_diff_norm',
                                 'difference' : 'mat_diff', 'date1_nan' : 'date1_nan',
-                                'mat_diff_flags_to_median' : 'mat_diff_flags_to_median'}
+                                'mat_diff_flags_to_median' : 'mat_diff_flags_to_median',
+                                'median_elevation' : 'median_elevation'}
 
         mat_object_to_tif =     {'mat_clip1' : 'depth_{0}'.format(self.date1_string),
                                 'mat_clip2' : 'depth_{0}'.format(self.date2_string),
                                 'mat_diff_norm' : 'difference_normalized',
                                 'mat_diff' : 'difference',
-                                'mat_diff_flags_to_median' : 'mat_diff_flags_to_median'}
+                                'median_elevation' : 'median_diff_elev'}
 
         #COMBINE dictionaries into NESTED dictionary
         self.keys_master = {'operators' : operators,
@@ -464,31 +467,16 @@ class MultiArrayOverlap(object):
         # now that calculations complete (i.e. self.mat_diff > 1), set -9999 to nan
         self.mat_diff[~self.mask_nan_snow_present] = np.nan
         self.mat_diff_norm[~self.mask_nan_snow_present] = np.nan
-        self.mat_diff_flags_to_median[~self.mask_nan_snow_present] = np.nan
         self.mat_clip1 = np.ndarray.astype(self.mat_clip1, np.float32)
         self.mat_clip2 = np.ndarray.astype(self.mat_clip2, np.float32)
         self.mat_clip1[self.mat_clip1 == -9999] = np.nan
         self.mat_clip2[self.mat_clip2 == -9999] = np.nan
+        self.median_elevation = np.ndarray.astype(self.median_elevation, np.float32)
+        self.median_elevation[~self.mask_nan_snow_present] = np.nan
         # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
         self.mask_overlap_nan = ~self.mask_overlap_nan
 
-        # PREPARE bands to be saved to tif
-        # for config parsimony, user selected 'basin_block' 'elevation_block' and/or 'tree'
-        # which initiates 'loss' and 'gain' flags for each.
-        # Below code simply parses the three user config values into
-        # 'loss' and 'gain' for each and saves as flags names for output.
-        flag_names = []
-        for flag in flags:
-            if flag not in ['basin_block', 'elevation_block', 'tree']:
-                flag_names.append('flag_' + flag)
-                # flagged = getattr(self, flag_flags[i])
-            else:
-                if flag in ['basin_block']:
-                    flag_names.extend(('flag_basin_loss', 'flag_basin_gain'))
-                elif flag in ['elevation_block']:
-                    flag_names.extend(('flag_elevation_loss', 'flag_elevation_gain'))
-                elif flag in ['tree']:
-                    flag_names.extend(('flag_tree_loss', 'flag_tree_gain'))
+        flag_names = self.get_flag_names(flags)
 
         # append masks to flags list to save to tiff
         if include_masks != None:
@@ -567,6 +555,9 @@ class MultiArrayOverlap(object):
                     dst.write_band(id, mat_temp.astype('float32'))
                     dst.set_band_description(id, band_names[id - 1])
 
+        self.flag_names = flag_names
+        self.array_names = array_names
+
         # Now all is complete, DELETE clipped files from clip_extent_overlap()
         # Upon user specification in UserConfig,
         try:
@@ -578,6 +569,25 @@ class MultiArrayOverlap(object):
 
         tock = time.clock()
         print('save tiff = ', round(tock - tick, 2), 'seconds')
+
+    def get_flag_names(self, flags):
+        # PREPARE bands to be saved to tif
+        # for config parsimony, user selected 'basin_block' 'elevation_block' and/or 'tree'
+        # which initiates 'loss' and 'gain' flags for each.
+        # Below code simply parses the three user config values into
+        flag_names = []
+        for flag in flags:
+            if flag not in ['basin_block', 'elevation_block', 'tree']:
+                flag_names.append('flag_' + flag)
+                # flagged = getattr(self, flag_flags[i])
+            else:
+                if flag in ['basin_block']:
+                    flag_names.extend(('flag_basin_loss', 'flag_basin_gain'))
+                elif flag in ['elevation_block']:
+                    flag_names.extend(('flag_elevation_loss', 'flag_elevation_gain'))
+                elif flag in ['tree']:
+                    flag_names.extend(('flag_tree_loss', 'flag_tree_gain'))
+        return(flag_names)
 
     def plot_this(self, action):
         plot_basic(self, action, self.file_path_out_histogram)
@@ -1001,7 +1011,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
             thresh_upper_norm[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[1])
             thresh_lower_raw[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[2])
             thresh_lower_norm[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[3])
-            median_raw[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2], 50)
+            median_raw[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2], 50)
             elevation_count[id] = getattr(temp3[map_id_dem_overlap == id_dem_unique2], 'sum')()
             # elevation_std[id] = getattr(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], 'std')()
 
@@ -1011,19 +1021,19 @@ class Flags(MultiArrayOverlap, PatternFilters):
         thresh_lower_norm_array = thresh_upper_norm_array.copy()
         thresh_upper_raw_array = thresh_upper_norm_array.copy()
         thresh_lower_raw_array = thresh_upper_norm_array.copy()
+        thresh_median_raw_array = thresh_upper_norm_array.copy()
         for id, id_dem_unique2 in enumerate(id_dem_unique):
             id_bin = map_id_dem == id_dem_unique2
             try:
                 thresh_upper_norm_array[id_bin] = thresh_upper_norm[id]
                 thresh_upper_raw_array[id_bin] = thresh_upper_raw[id]
-            except IndexError as e:
-                print(e)
-            try:
                 thresh_lower_norm_array[id_bin] = thresh_lower_norm[id]
                 thresh_lower_raw_array[id_bin] = thresh_lower_raw[id]
+                thresh_median_raw_array[id_bin] = median_raw[id]
             except IndexError as e:
                 print(e)
-
+        # save as attribute for plotting purposes
+        self.median_elevation = thresh_median_raw_array
         # # this is used to calculate effect of flagged pixels
         # if self.estimate_effect_flagged == True:
         #     self.median_depth_elevation = median_raw.copy()
@@ -1165,36 +1175,47 @@ class Flags(MultiArrayOverlap, PatternFilters):
             elif logic == 'elevation':
                 setattr(self, tree_flag_name, temp_elevation & self.veg_presence)
 
-    def effect_flags(self):
+    def stats_report(self, flags):
         map_id_dem, id_dem_unique, elevation_edges = \
             get_elevation_bins(self.dem_clip, self.mask_nan_snow_present, \
                                 self.elevation_band_resolution)
 
-        flags = self.flag_elevation_gain
+        flags = self.get_flag_names(flags)
         mat_diff = self.mat_diff.copy()
-        mask_temp = self.mask_nan_snow_present & ~flags
-        mat_diff_clip = mat_diff[mask_temp]
-        map_id_dem_clip = map_id_dem[mask_temp]
+        table_rows = []
+        for flag_name in flags:
+            row = []
+            flag = getattr(self, flag_name)
+            mask_temp = self.mask_nan_snow_present & ~flag
+            mat_diff_clip = mat_diff[mask_temp]
+            map_id_dem_clip = map_id_dem[mask_temp]
 
-        median_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
-        # save bin statistics per elevation bin to a numpy 1D Array i.e. list
-        for id, id_dem_unique2 in enumerate(id_dem_unique):
-            median_raw[id] = np.percentile(mat_diff_clip[map_id_dem_clip == \
-                                                        id_dem_unique2], 50)
+            median_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
+            # save bin statistics per elevation bin to a numpy 1D Array i.e. list
+            for id, id_dem_unique2 in enumerate(id_dem_unique):
+                median_raw[id] = np.percentile(mat_diff_clip[map_id_dem_clip == \
+                                                            id_dem_unique2], 50)
 
-        # Place threshold values onto map in appropriate elevation bin
-        # Used to find elevation based outliers
-        thresh_median_array = np.zeros(mat_diff.shape, dtype=np.float16)
-        for id, id_dem_unique2 in enumerate(id_dem_unique):
-            id_bin = map_id_dem == id_dem_unique2
-            try:
-                thresh_median_array[id_bin] = median_raw[id]
-            except IndexError as e:
-                print(e)
+            # Place threshold values onto map in appropriate elevation bin
+            # Used to find elevation based outliers
+            thresh_median_array = np.zeros(mat_diff.shape, dtype=np.float16)
+            for id, id_dem_unique2 in enumerate(id_dem_unique):
+                id_bin = map_id_dem == id_dem_unique2
+                try:
+                    thresh_median_array[id_bin] = median_raw[id]
+                except IndexError as e:
+                    print(e)
 
-        mat_diff_flags_to_median = mat_diff.copy()
-        mat_diff_flags_to_median[flags] = thresh_median_array[flags]
-        sum1 = np.sum(np.ndarray.astype(mat_diff[self.mask_nan_snow_present], np.double))
-        sum2 = np.sum(np.ndarray.astype(mat_diff_flags_to_median[self.mask_nan_snow_present], np.double))
-        print('delta ', (sum1 - sum2) / sum1)
-        self.mat_diff_flags_to_median = mat_diff_flags_to_median
+            mat_diff_flags_to_median = mat_diff.copy()
+            mat_diff_flags_to_median[flag] = thresh_median_array[flag]
+            sum1 = np.sum(np.ndarray.astype(mat_diff[self.mask_nan_snow_present], np.double))
+            sum2 = np.sum(np.ndarray.astype(mat_diff_flags_to_median[self.mask_nan_snow_present], np.double))
+            delta = round(100 * ((sum1 - sum2) / sum1), 1)
+            row.extend([flag_name, '{}%'.format(delta)])
+            # total cells in flag
+            cell_total = np.sum(flag) / np.sum(self.mask_nan_snow_present)
+            cell_total = round((cell_total * 100),1)
+            row.append('{}%'.format(cell_total))
+            table_rows.append(row)
+
+        print('\n',tabulate(table_rows, headers = ['flag name', 'delta', 'pct coverage']), '\n')
