@@ -14,7 +14,7 @@ import affine
 from memory_profiler import profile
 from .utilities import prep_coords, get_elevation_bins, evenly_divisible_extents
 from tabulate import tabulate
-
+import pandas as pd
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
@@ -1182,7 +1182,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
         flags = self.get_flag_names(flags)
         mat_diff = self.mat_diff.copy()
-        table_rows = []
+        delta, cell_count, pct_coverage = [], [], []
         for flag_name in flags:
             row = []
             flag = getattr(self, flag_name)
@@ -1210,12 +1210,14 @@ class Flags(MultiArrayOverlap, PatternFilters):
             mat_diff_flags_to_median[flag] = thresh_median_array[flag]
             sum1 = np.sum(np.ndarray.astype(mat_diff[self.mask_nan_snow_present], np.double))
             sum2 = np.sum(np.ndarray.astype(mat_diff_flags_to_median[self.mask_nan_snow_present], np.double))
-            delta = round(100 * ((sum1 - sum2) / sum1), 1)
-            row.extend([flag_name, '{}%'.format(delta)])
+            delta_temp = round(100 * ((sum1 - sum2) / sum1), 1)
+            delta.append('{}%'.format(delta_temp))
             # total cells in flag
-            cell_total = np.sum(flag) / np.sum(self.mask_nan_snow_present)
-            cell_total = round((cell_total * 100),1)
-            row.append('{}%'.format(cell_total))
-            table_rows.append(row)
-
-        print('\n',tabulate(table_rows, headers = ['flag name', 'delta', 'pct coverage']), '\n')
+            cell_count_temp = np.sum(flag)
+            cell_count.append(cell_count_temp)
+            pct_coverage_temp = cell_count_temp / np.sum(self.mask_nan_snow_present)
+            pct_coverage_temp = round((pct_coverage_temp * 100),1)
+            pct_coverage.append('{}%'.format(pct_coverage_temp))
+        df = pd.DataFrame({'flag' : flags, 'cell count' : cell_count, 'percent coverage' : pct_coverage, 'delta' : delta})
+        df = df[['flag', 'cell count', 'percent coverage', 'delta']]
+        print(df)
