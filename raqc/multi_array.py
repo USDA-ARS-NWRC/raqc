@@ -12,7 +12,9 @@ import pandas as pd
 import json
 import affine
 from memory_profiler import profile
-from .utilities import prep_coords, get_elevation_bins, evenly_divisible_extents
+from .utilities import prep_coords, get_elevation_bins, check_DEM_resolution, \
+                        evenly_divisible_extents, get16bit, update_meta_from_json, \
+                        apply_dict
 from tabulate import tabulate
 import pandas as pd
 
@@ -27,7 +29,18 @@ class MultiArrayOverlap(object):
         provide input file paths that were already clipped,
         i.e. USCATE20180528_to_20180423_SUPERsnow_depth.tif, or use file paths
         of original files, and this will be checked in clip_overlap_extent()
+
+        Args:
+            file_path_dataset1:             date1 file path
+            file_path_dataset2:             date2 file path
+            file_path_topo:                 topo.nc file path
+            file_out_root:                  root path to join with basin and
+                                            file_name_modifier
+            basin:                          Tuolumne, SanJoaquin, etc.
+            file_name_modifier:             Links backup_config to file
+            elevation_band_resolution:      see .utilities get_elevation_bins
         """
+
         # Ensure that dataset 1 and dataset2 are in chronological order
         self.date1_string = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
         self.date2_string = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
@@ -133,6 +146,9 @@ class MultiArrayOverlap(object):
         finds overlapping extent of the input files (Geotiffs).  Adds clipped
         matrices of input files as attributes, and additionally outputs geotiffs
         of each (both snow dates, DEM, and Vegetation).
+
+        Arguments:
+            remove_clipped_files:   UserConfig option to delete clipped file
         """
 
         topo_rez_same, self.extents_same, min_extents = prep_coords( \
@@ -283,12 +299,12 @@ class MultiArrayOverlap(object):
         file into more parsimonious abbreviations used in code
 
         Outputs (attributes):
-        mask_overlap_nans:       mask - no nans present in any input matrices
-        flag_zero_and_nans:      flag - nans in one date and zeros in another
-                                    nans set to -9999
-        mask_nan_snow_present:   mask - snow is present in both dates, and no nans
-        all_gain:                mask from zero snow in date1 to snow of any amount
-                                    in date2.
+            mask_overlap_nans:       mask - no nans present in any input matrices
+            flag_zero_and_nans:      flag - nans in one date and zeros in another
+                                        nans set to -9999
+            mask_nan_snow_present:   mask - snow is present in both dates, and no nans
+            all_gain:                mask from zero snow in date1 to snow of any amount
+                                        in date2.
         """
         #Create master dictionary (key)
         operators = {'less_than':'<', 'greater_than':'>'}
@@ -336,13 +352,13 @@ class MultiArrayOverlap(object):
         outliers ruin the visualtion.
 
         Arguments
-        name: list of strings (1xN), matrix names to base map off of.
-        action: Compare or not.  Only two options currently.  Can be expanded in future.
-        operation:  (1x2N)list of strings, operation codes to be performed on each matrix
-        value: list of floats (1x2N), matching value pairs to operation comparison operators.
+            name: list of strings (1xN), matrix names to base map off of.
+            action: Compare or not.  Only two options currently.  Can be expanded in future.
+            operation:  (1x2N)list of strings, operation codes to be performed on each matrix
+            value: list of floats (1x2N), matching value pairs to operation comparison operators.
 
         Output (attribute):
-        mask_overlap_conditional:    mask - where no outliers of nans occur
+            mask_overlap_conditional:    mask - where no outliers of nans occur
         """
 
         print('Entered mask_advanced')
@@ -372,16 +388,16 @@ class MultiArrayOverlap(object):
         (Difference divided by date 1 raw depth).
 
         Outputs (attributes):
-        all_loss:       mask - indicating snow of any amount in date1 to zero snow on date2
-        mat_diff:       matrix - date1 depth - date2 depth
-        mat_diff_norm:  matrix - mat_diff / date1
+            all_loss:       mask - indicating snow of any amount in date1 to zero snow on date2
+            mat_diff:       matrix - date1 depth - date2 depth
+            mat_diff_norm:  matrix - mat_diff / date1
         """
         with rio.open(self.file_path_date1_clipped) as src:
             d1_te = src
             mat_clip1 = d1_te.read()  #matrix
             mat_clip1 = mat_clip1[0]
             mat_clip1[np.isnan(mat_clip1)] = -9999
-            mat_clip1 = self.get16bit(mat_clip1)
+            mat_clip1 = get16bit(mat_clip1)
             self.mat_clip1 = mat_clip1.copy()
         with rio.open(self.file_path_date2_clipped) as src:
             self.d2_te = src
@@ -389,7 +405,7 @@ class MultiArrayOverlap(object):
             mat_clip2 = self.d2_te.read()  #matrix
             mat_clip2 = mat_clip2[0]
             mat_clip2[np.isnan(mat_clip2)] = -9999
-            mat_clip2 = self.get16bit(mat_clip2)
+            mat_clip2 = get16bit(mat_clip2)
             self.mat_clip2 = mat_clip2.copy()
         with rio.open(self.file_name_dem) as src:
             topo_te = src
@@ -398,7 +414,7 @@ class MultiArrayOverlap(object):
             dem_clip[np.isnan(dem_clip)] = -9999
             self.dem_clip = dem_clip.copy()
             # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
-            self.check_DEM_resolution()
+            check_DEM_resolution(self.dem_clip, self.elevation_band_resolution)
 
         self.all_loss = (np.absolute(mat_clip1) > 0) & (np.absolute(mat_clip2) == 0)  #all loss minimal
         mat_diff = mat_clip2 - mat_clip1  # raw difference
@@ -409,39 +425,48 @@ class MultiArrayOverlap(object):
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
 
     # @profile
-    def determine_if_extents_changed(self):
+    def get_buffer(self):
         """
-        A check of if clipped files were actually clipped
+        Returns numbers of cells to buffer tiff to match original size, extents, etc.
+
+        Outputs:
+            buffer:     dictionary with buffer values left, right, bottom, top
         """
+        # determine if
+        if self.already_clipped:
+            self.extents_same = prep_coords(file_path_dataset1, \
+                                    file_path_dataset2, file_path_topo, band)[1]
+        else:
+            pass
+        if not self.extents_same:
+            # get extents and resolution from json and determine if originally clipped
+            d_orig = self.derive_dataset('d2_te')
 
-        # get extents and resolution from json and determine if originally clipped
-        d_orig = self.derive_dataset('d2_te')
+            #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
 
-        #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
+            bounds_date2_te = [None] * 4
+            bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, self.d2_te.bounds.bottom
+            bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.right, self.d2_te.bounds.top
 
-        bounds_date2_te = [None] * 4
-        bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, self.d2_te.bounds.bottom
-        bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.right, self.d2_te.bounds.top
+            rez = d_orig['resolution']
+            bounds_date2 = [None] * 4
+            bounds_date2[0] = evenly_divisible_extents(d_orig['left'], rez)
+            bounds_date2[2] = evenly_divisible_extents(d_orig['right'], rez)
+            bounds_date2[1] = evenly_divisible_extents(d_orig['bottom'], rez)
+            bounds_date2[3] = evenly_divisible_extents(d_orig['top'], rez)
 
-        rez = d_orig['resolution']
-        bounds_date2 = [None] * 4
-        bounds_date2[0] = evenly_divisible_extents(d_orig['left'], rez)
-        bounds_date2[2] = evenly_divisible_extents(d_orig['right'], rez)
-        bounds_date2[1] = evenly_divisible_extents(d_orig['bottom'], rez)
-        bounds_date2[3] = evenly_divisible_extents(d_orig['top'], rez)
-
-        buffer={}
-        # Notice '*-1'.  Those ensure subsetting flag array into nan array
-        # buffers -<buffer> on right and bottom, and +<buffer> top and left
-        buffer.update({'left' : round((bounds_date2[0] - bounds_date2_te[0]) / rez) * -1})
-        buffer.update({'bottom' : round((bounds_date2[1] - bounds_date2_te[1]) / rez)})
-        buffer.update({'right' : round((bounds_date2[2] - bounds_date2_te[2]) / rez) * -1})
-        buffer.update({'top' : round((bounds_date2[3] - bounds_date2_te[3]) / rez)})
-        for k, v in buffer.items():
-            if v == 0:
-                buffer[k] = None
-        self.buffer = buffer
-        print(buffer)
+            buffer={}
+            # Notice '*-1'.  Those ensure subsetting flag array into nan array
+            # buffers -<buffer> on right and bottom, and +<buffer> top and left
+            buffer.update({'left' : round((bounds_date2[0] - bounds_date2_te[0]) / rez) * -1})
+            buffer.update({'bottom' : round((bounds_date2[1] - bounds_date2_te[1]) / rez)})
+            buffer.update({'right' : round((bounds_date2[2] - bounds_date2_te[2]) / rez) * -1})
+            buffer.update({'top' : round((bounds_date2[3] - bounds_date2_te[3]) / rez)})
+            for k, v in buffer.items():
+                if v == 0:
+                    buffer[k] = None
+            self.buffer = buffer
+            print(buffer)
     def save_tiff(self, fname, flags, include_arrays, include_masks):
         """
         Saves up to two geotiffs using RasterIO basically.  One tiff will be the
@@ -464,14 +489,17 @@ class MultiArrayOverlap(object):
 
         tick = time.clock()
 
+        # Save all arrays as float32
+        # convert to float from int to set NaNs back
+        self.mat_clip1 = np.ndarray.astype(self.mat_clip1, np.float32)
+        self.mat_clip2 = np.ndarray.astype(self.mat_clip2, np.float32)
+        self.median_elevation = np.ndarray.astype(self.median_elevation, np.float32)
+
         # now that calculations complete (i.e. self.mat_diff > 1), set -9999 to nan
         self.mat_diff[~self.mask_nan_snow_present] = np.nan
         self.mat_diff_norm[~self.mask_nan_snow_present] = np.nan
-        self.mat_clip1 = np.ndarray.astype(self.mat_clip1, np.float32)
-        self.mat_clip2 = np.ndarray.astype(self.mat_clip2, np.float32)
         self.mat_clip1[self.mat_clip1 == -9999] = np.nan
         self.mat_clip2[self.mat_clip2 == -9999] = np.nan
-        self.median_elevation = np.ndarray.astype(self.median_elevation, np.float32)
         self.median_elevation[~self.mask_nan_snow_present] = np.nan
         # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
         self.mask_overlap_nan = ~self.mask_overlap_nan
@@ -484,11 +512,10 @@ class MultiArrayOverlap(object):
                 flag_names.append('mask_' + mask)
 
         # finally, change abbreviated object names to verbose, intuitive names
-        band_names = self.apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
+        band_names = apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
 
-        # if self.disjoint_bounds:
+        self.get_buffer()
         if not self.extents_same:
-            self.determine_if_extents_changed()
             buffer = self.buffer
             # buffer flag arrays with nans to fit original date2 array shape
             # nan = <uint> 255
@@ -499,9 +526,9 @@ class MultiArrayOverlap(object):
                 setattr(self, band, flag_buffer)
 
             # grab json with original metadata and format some key value pairs
-            self.update_meta_from_json()
+            meta_orig = update_meta_from_json(self.file_path_out_json)
             # update clipped metadata with that of original - extents, resolutition, etc.
-            self.meta2_te.update(self.meta_orig)
+            self.meta2_te.update(meta_orig)
 
         # upate metadata to include number of bands (flags) and uint8 dtype
         self.meta2_te.update({
@@ -535,7 +562,7 @@ class MultiArrayOverlap(object):
                     setattr(self, band, array_buffer)
 
             # finally, change abbreviated object names to verbose, intuitive names
-            band_names = self.apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
+            band_names = apply_dict(array_names, self.keys_master, 'mat_object_to_tif')
 
             # update metadata to reflect new band count
             self.meta2_te.update({
@@ -571,10 +598,18 @@ class MultiArrayOverlap(object):
         print('save tiff = ', round(tock - tick, 2), 'seconds')
 
     def get_flag_names(self, flags):
-        # PREPARE bands to be saved to tif
-        # for config parsimony, user selected 'basin_block' 'elevation_block' and/or 'tree'
-        # which initiates 'loss' and 'gain' flags for each.
-        # Below code simply parses the three user config values into
+        """
+        PREPARE bands to be saved to tif
+        To simplify UserConfig, options were 'basin_block' 'elevation_block' and/or 'tree'
+        Each of these values yield 'loss' and 'gain' flags for each.
+        Below code simply parses the three user config values into loss and gain
+        flag names
+
+        Arguments:
+            flags:  flag names
+        Outputs:
+            flag_names:     list of flag names
+        """
         flag_names = []
         for flag in flags:
             if flag not in ['basin_block', 'elevation_block', 'tree']:
@@ -592,75 +627,17 @@ class MultiArrayOverlap(object):
     def plot_this(self, action):
         plot_basic(self, action, self.file_path_out_histogram)
 
-    def check_DEM_resolution(self):
-        """
-        Brief method ensuring that DEM resolution from UserConfig can be partitioned
-        into uint8 datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
-        <= 255 elevation bands based on the elevation range of topo file.
-        """
-        min_elev, max_elev = np.min(self.dem_clip), np.max(self.dem_clip)
-        num_elev_bins = math.ceil((max_elev - min_elev) / self.elevation_band_resolution)
-        min_elev_band_rez = math.ceil((max_elev - min_elev) / 254)
-        if num_elev_bins > 254:
-            print('In the interest of saving memory, please lower (make more coarse)' \
-            '\nyour elevation band resolution' \
-            '\nthe number of elevation bins must not exceed 254 ' \
-            '\ni.e. (max elevation - min elevation) / elevation band resolution must not exceed 254)' \
-            '\nEnter a new resolution ---> (Must be no finer than {0})'.format(min_elev_band_rez))
-
-            while True:
-                response = input()
-                try:
-                    response = float(response)
-                except ValueError:
-                    print('must enter a float or integer')
-                else:
-                    if response > min_elev_band_rez:
-                        self.min_elev_band_rez = response
-                        print('your new elevation_band_resolution will be: {}. Note that this will NOT be reflected on your backup_config.ini file'.format(response))
-                        break
-                    else:
-                        print('Value still too fine. Enter a new resolution ---> must be no finer than{0})'.format(min_elev_band_rez))
-
-    def get16bit(self, array):
-        """
-        Converts array into numpy 16 bit integer
-        """
-        id_nans = array == -9999
-        array_cm = np.round(array,2) * 100
-        array_cm = np.ndarray.astype(array_cm, np.int16)
-        array_cm[id_nans] = -9999
-        return(array_cm)
-
-    def apply_dict(self, original_list, dictionary, nested_key):
-        """
-        Basically translates Config file names into attribute names if necessary
-        """
-        keyed_list = []
-        for val in original_list:
-            try:
-                keyed_list.append(dictionary[nested_key][val])
-            except KeyError:
-                keyed_list.append(val)
-        return(keyed_list)
-
-    def update_meta_from_json(self):
-        """
-        manually add add 'transform' key to metadata.
-        unable to retain with json.dump as it is not "serializable
-        basically pass epsg number <int> to affine.Affine and replace
-        value in metadata with output
-        """
-        with open(self.file_path_out_json) as json_file:
-            meta_orig = json.load(json_file)
-        crs_object = rio.crs.CRS.from_epsg(meta_orig['crs'])
-        transform_object = affine.Affine(*meta_orig['transform'][:6])
-        meta_orig.update({'crs' : crs_object, 'transform' : transform_object})
-        self.meta_orig = meta_orig
-
     def derive_dataset(self, dataset_clipped_name):
+        """
+        Unpacks, formats original metadate from json file and returns
 
-        dataset_orig = {}
+        Outputs:
+            orig_shape:         dimensions of original date2 input tif
+            extents_same:       boolean - was original file clipped
+            orig_extents_rez:   extents and resolution of orig date2 input tif
+        """
+
+        orig_extents_rez = {}
         with open(self.file_path_out_json) as json_file:
             meta_orig = json.load(json_file)
 
@@ -679,55 +656,14 @@ class MultiArrayOverlap(object):
                             (meta_clip.bounds.right == right) & \
                             (meta_clip.bounds.top == top) & \
                             (meta_clip.bounds.bottom == bottom)
-        dataset_orig.update({'left' : left, 'right' : right, 'top' : top, \
+        orig_extents_rez.update({'left' : left, 'right' : right, 'top' : top, \
                         'bottom' : bottom, 'resolution' : rez})
 
         # save size of original array as tuple to get shape
         orig_shape = []
         orig_shape.extend([round((top - bottom)/rez), round((right - left)/rez)])
         self.orig_shape = tuple(orig_shape)
-        return(dataset_orig)
-
-    def trim_extent_nan(self, name):
-        """Used to trim path and rows from array edges with na values.
-        Returns slimmed down matrix for display purposes and saves as attribute.
-
-        Args:
-            name:    matrix name (string) to access matrix attribute
-        Returns:
-            np.array:
-            **mat_trimmed_nan**: matrix specified by name trimmed to nan extents on all four edges.
-        """
-        mat_trimmed_nan = getattr(self, name)
-        mat = self.mask_overlap_nan
-        nrows, ncols = self.mask_overlap_nan.shape[0], self.mask_overlap_nan.shape[1]
-        #Now get indices to clip excess NAs
-        tmp = []
-        for i in range(nrows):
-            if any(mat[i,:] == True):
-                id = i
-                break
-        tmp.append(id)
-        for i in range(nrows-1, 0, -1):  #-1 because of indexing...
-            if any(mat[i,:] == True):
-                id = i
-                break
-        tmp.append(id)
-        for i in range(ncols):
-            if any(mat[:,i] == True):
-                id = i
-                break
-        tmp.append(id)
-        for i in range(ncols-1, 0, -1):  #-1 because of indexing...
-            if any(mat[:,i] == True):
-                id = i
-                break
-        tmp.append(id)
-        idc = tmp
-        mat_trimmed_nan = mat_trimmed_nan[idc[0]:idc[1],idc[2]:idc[3]]
-        if ~hasattr(self, 'mask_overlap_nan_trim'):
-            self.mask_overlap_nan_trim = self.mask_overlap_nan[idc[0]:idc[1],idc[2]:idc[3]]  # overlap boolean trimmed to nan_extent
-        return mat_trimmed_nan
+        return(orig_extents_rez)
 
 class PatternFilters():
     def init(self):

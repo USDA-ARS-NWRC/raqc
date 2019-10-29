@@ -1,6 +1,9 @@
 import rasterio as rio
 import time
 import numpy as np
+import math
+import json
+import affine
 
 def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
     """
@@ -41,17 +44,6 @@ def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
     rez2 = meta2['transform'][0]
     rez3 = meta3['transform'][0]
 
-    # check that date1 and date2 spatial resolutions are the same.
-    if round(rez) == round(rez2):  #hack way to check all three rez the same
-        pass
-    else:
-        sys.exit("check that spatial resolution of your two repeat array \
-        files are the same must fix and try again")
-    if round(rez) == round(rez3):
-        topo_rez_same = True
-    else:
-        topo_rez_same = False
-
     # Seemingly wierd but necessary and simple way to check if bounds
     # of both dates AND topo are the same.
     # Rio...disjoint_bounds ONLY ACCEPTS two args, hence the if statements
@@ -63,6 +55,17 @@ def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
         extents_same = extents_same2 # True or False
     else:
         extents_same = extents_same  # False
+
+    # check that date1 and date2 spatial resolutions are the same.
+    if round(rez) == round(rez2):  #hack way to check all three rez the same
+        pass
+    else:
+        sys.exit("check that spatial resolution of your two repeat array \
+        files are the same must fix and try again")
+    if round(rez) == round(rez3):
+        topo_rez_same = True
+    else:
+        topo_rez_same = False
 
     # .nc have different standards for spatial metadata than geotiff,
     # At least the metadata pulled from rasterio
@@ -119,8 +122,6 @@ def evenly_divisible_extents(coord, rez):
             coord_updated = coord - (coord % round(rez))
     else:
         coord_updated = coord
-    print('coord, ', coord)
-    print('coord_updated, ', coord_updated)
     return(coord_updated)
 
 def bounds_to_pix_coords(bound, rez, location):
@@ -139,7 +140,6 @@ def bounds_to_pix_coords(bound, rez, location):
     bound_new:  correct pixel coordinates for bounds
     """
 
-    print('bound in', bound)
     # dictionary converts key into string of 'out' or 'in' for shifting bounds
     # in or out
     dict_offset_coords = {'left':'out', 'right':'in', 'bottom':'out', 'top':'in'}
@@ -148,7 +148,6 @@ def bounds_to_pix_coords(bound, rez, location):
         bound_new = bound - rez / 2
     if location == 'out':
         bound_new = bound + rez / 2
-    print('bound returned ', bound_new)
     return(bound_new)
 
 def rasterio_netCDF(file_path):
@@ -191,7 +190,6 @@ def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
     # creates elevation bin edges using min, max and elevation band resolution
     elevation_edges = np.arange(edge_min, edge_max + 0.1, \
                                     elevation_band_resolution)
-    print('bin edges ', elevation_edges)
     # Create bins for elevation bands i.e. from 1 to N where
     #   N = (edge_max - edge_min) / elevation_band_resolution
     #   For example --->
@@ -207,3 +205,74 @@ def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
     # places bin ids into map space (map_id_dem)
     map_id_dem[dem_mask] = id_dem
     return map_id_dem, id_dem_unique, elevation_edges
+
+def check_DEM_resolution(dem_clip, elevation_band_resolution):
+    """
+    Brief method ensuring that DEM resolution from UserConfig can be partitioned
+    into uint8 datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
+    <= 255 elevation bands based on the elevation range of topo file.
+    """
+    min_elev, max_elev = np.min(dem_clip), np.max(dem_clip)
+    num_elev_bins = math.ceil((max_elev - min_elev) / elevation_band_resolution)
+    min_elev_band_rez = math.ceil((max_elev - min_elev) / 254)
+    if num_elev_bins > 254:
+        print('In the interest of saving memory, please lower (make more coarse)' \
+        '\nyour elevation band resolution' \
+        '\nthe number of elevation bins must not exceed 254 ' \
+        '\ni.e. (max elevation - min elevation) / elevation band resolution must not exceed 254)' \
+        '\nEnter a new resolution ---> (Must be no finer than {0})'.format(min_elev_band_rez))
+
+        while True:
+            response = input()
+            try:
+                response = float(response)
+            except ValueError:
+                print('must enter a float or integer')
+            else:
+                if response > min_elev_band_rez:
+                    self.min_elev_band_rez = response
+                    print('your new elevation_band_resolution will be: {}. Note that this will NOT be reflected on your backup_config.ini file'.format(response))
+                    break
+                else:
+                    print('Value still too fine. Enter a new resolution ---> must be no finer than{0})'.format(min_elev_band_rez))
+def get16bit(array):
+    """
+    Converts array into numpy 16 bit integer
+    """
+    id_nans = array == -9999
+    array_cm = np.round(array,2) * 100
+    array_cm = np.ndarray.astype(array_cm, np.int16)
+    array_cm[id_nans] = -9999
+    return(array_cm)
+
+def apply_dict(original_list, dictionary, nested_key):
+    """
+    Basically translates Config file names into attribute names if necessary
+    Args:
+        origingal_list:     list to be mapped using dictionary
+        dictionary:         nested dictionary (nuff said)
+        nested_key          key (string) of outter nest
+    Returns:
+        mapped_list:        list mapped to new values
+    """
+    mapped_list = []
+    for val in original_list:
+        try:
+            mapped_list.append(dictionary[nested_key][val])
+        except KeyError:
+            mapped_list.append(val)
+    return(mapped_list)
+
+def update_meta_from_json(file_path_json):
+    """
+    manually add add 'transform' key to metadata.
+    unable to retain with json.dump as it is not "serializable
+    basically pass epsg number <int> to affine.Affine and replace
+    value in metadata with output
+    """
+    with open(file_path_json) as json_file:
+        meta_orig = json.load(json_file)
+    crs_object = rio.crs.CRS.from_epsg(meta_orig['crs'])
+    transform_object = affine.Affine(*meta_orig['transform'][:6])
+    meta_orig.update({'crs' : crs_object, 'transform' : transform_object})
+    return(meta_orig)
