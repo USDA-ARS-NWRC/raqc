@@ -151,7 +151,7 @@ class MultiArrayOverlap(object):
             remove_clipped_files:   UserConfig option to delete clipped file
         """
 
-        topo_rez_same, self.extents_same, min_extents = prep_coords( \
+        topo_rez_same, extents_same, min_extents = prep_coords( \
                 self.file_path_dataset1, self.file_path_dataset2, \
                 self.file_path_topo, 'dem')
 
@@ -230,7 +230,7 @@ class MultiArrayOverlap(object):
                         self.file_name_base + '_veg_height.tif')
 
         # START Clipping
-        if not self.extents_same:
+        if not extents_same:
             # if date1, date2 and topo have different extents  ---> clip
             run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
                         (*min_extents, self.file_path_dataset1, \
@@ -280,7 +280,7 @@ class MultiArrayOverlap(object):
         run(run_arg5b, shell = True)
 
         # If clipped, save filepath as these
-        if not self.extents_same:
+        if not extents_same:
             self.file_path_date1_clipped = file_path_date1_te
             self.file_path_date2_clipped = file_path_date2_te
             self.file_name_dem = self.file_name_base + '_dem_common_extent.tif'
@@ -432,16 +432,11 @@ class MultiArrayOverlap(object):
         Outputs:
             buffer:     dictionary with buffer values left, right, bottom, top
         """
-        # determine if
-        if self.already_clipped:
-            self.extents_same = prep_coords(file_path_dataset1, \
-                                    file_path_dataset2, file_path_topo, band)[1]
-        else:
-            pass
-        if not self.extents_same:
-            # get extents and resolution from json and determine if originally clipped
-            d_orig = self.derive_dataset('d2_te')
 
+
+        # get extents and resolution from json and determine if originally clipped
+        d_orig = self.derive_dataset('d2_te')
+        if not self.extents_same:
             #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
 
             bounds_date2_te = [None] * 4
@@ -629,7 +624,8 @@ class MultiArrayOverlap(object):
 
     def derive_dataset(self, dataset_clipped_name):
         """
-        Unpacks, formats original metadate from json file and returns
+        Unpacks, formats original metadata from json file and returns
+        Also determines self.extents_same
 
         Outputs:
             orig_shape:         dimensions of original date2 input tif
@@ -836,7 +832,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
         tock = time.clock()
         print('hist2D_with_bins_mapped = ', round(tock - tick, 2), 'seconds')
 
-    def flag_basin_blocks(self, apply_moving_window, moving_window_size, neighbor_threshold, snowline_threshold):
+    def flag_basin_blocks(self, apply_moving_window, moving_window_size, \
+                            neighbor_threshold, snowline_threshold):
         """
         Finds cells of complete melt or snow where none existed prior.
         Apply moving window to remove scattered and isolated cells, ineffect
@@ -970,14 +967,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 print(e)
         # save as attribute for plotting purposes
         self.median_elevation = thresh_median_raw_array
-        # # this is used to calculate effect of flagged pixels
-        # if self.estimate_effect_flagged == True:
-        #     self.median_depth_elevation = median_raw.copy()
-        #     self.map_id_dem = map_id_dem
 
         # Combine outliers from mat_diff, mat_diff_norm or both mats accoring to UserConfig
         # Dictionary to translate values from UserConfig
-
         keys_local = {'loss' : {'operator' : 'less', 'flag' : 'flag_elevation_loss',
                         'mat_diff_norm' : thresh_lower_norm_array, 'mat_diff' : thresh_lower_raw_array},
                 'gain' : {'operator' : 'greater', 'flag' : 'flag_elevation_gain',
@@ -1089,6 +1081,10 @@ class Flags(MultiArrayOverlap, PatternFilters):
         These are cells with EITHER flag_elevation_gain/loss AND/OR
         flag_basin_bain/loss with trees present.
         Tree presense is determined from topo.nc vegetation band.
+
+        Args:
+            logic:  tree_loss and tree_gain UserConfig values i.e. use elevation,
+                    basin, and, or
         """
 
         key = {'loss' : {'basin' : 'flag_basin_loss', 'elevation' : 'flag_elevation_loss', 'flag_tree_name' : 'flag_tree_loss'},
@@ -1154,6 +1150,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
             pct_coverage_temp = cell_count_temp / np.sum(self.mask_nan_snow_present)
             pct_coverage_temp = round((pct_coverage_temp * 100),1)
             pct_coverage.append('{}%'.format(pct_coverage_temp))
-        df = pd.DataFrame({'flag' : flags, 'cell count' : cell_count, 'percent coverage' : pct_coverage, 'delta' : delta})
-        df = df[['flag', 'cell count', 'percent coverage', 'delta']]
-        print(df)
+        print('\n\n')
+        df = pd.DataFrame({'flag' : flags, 'cell count' : cell_count, 'percent coverage' : pct_coverage, '\u0394' : delta})
+        df = df[['flag', 'cell count', 'percent coverage', '\u0394']]
+        print(tabulate(df, headers='keys', colalign=["left", "left", "right", "left", "right"], tablefmt = "github"))
+        print('\n\n')

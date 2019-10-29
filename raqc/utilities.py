@@ -102,11 +102,11 @@ def evenly_divisible_extents(coord, rez):
     by the spatial resolution.  The spatial resolution will also be rounded to
     nearest integer.
 
-    Arguments
-    coord: coordinate (int or float)
-    rez:    spatial resolution i.e. 50m
-    Returns
-    coord_updated:  coordinate rounded to nearest multiple of rounded resolution.
+    Args:
+        coord: coordinate (int or float)
+        rez:    spatial resolution i.e. 50m
+    Returns:
+        coord_updated:  coordinate rounded to nearest multiple of rounded resolution.
                         ex) evenly_divisible_extents(2026, 49.99) returns 2050.
                             If coord = 2024 instead, 2000 returned
      See** needs tweaks to work reliable with resolutions (rez) < 2
@@ -131,13 +131,13 @@ def bounds_to_pix_coords(bound, rez, location):
     May need more investigation, but works when matching netCDF to geotiff
     coordinates using Rasterio
 
-    Arguments
-    bound:      bounding box extents from rasterio dataset of .nc file
-    rez:        spatial resolution
-    location:   left, right, top, or bottom bounding coordinates
+    Args:
+        bound:      bounding box extents from rasterio dataset of .nc file
+        rez:        spatial resolution
+        location:   left, right, top, or bottom bounding coordinates
 
     Returns:
-    bound_new:  correct pixel coordinates for bounds
+        bound_new:  correct pixel coordinates for bounds
     """
 
     # dictionary converts key into string of 'out' or 'in' for shifting bounds
@@ -176,6 +176,20 @@ def rasterio_netCDF(file_path):
     print(type(d1.bounds))
 
 def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
+    """
+    returns edges for dem elevation binning, an array with bin id numbers
+    indicating index of elevation bin, and finally a list of all the unique
+    indices from the array
+
+    Args:
+        dem:                        dem array
+        dem_mask:                   mask clipping dem for binning
+        elevation_band_resolution:  resolution of bin increments i.e. 50m
+    Returns:
+        map_id_dem:         dem array with bin ids in place of elevation
+        id_dem_unique:      list of unique dem ids
+        elevation_edges:    bin edges for elevation binning
+    """
     # use overlap_nan mask for snowline because we want to get average
     # snow per elevation band INCLUDING zero snow depth
 
@@ -211,6 +225,10 @@ def check_DEM_resolution(dem_clip, elevation_band_resolution):
     Brief method ensuring that DEM resolution from UserConfig can be partitioned
     into uint8 datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
     <= 255 elevation bands based on the elevation range of topo file.
+
+    Args:
+        dem_clip:                   just a dem that may or may not be clipped
+        elevation_band_resolution:  resolution of bin increments i.e. 50m
     """
     min_elev, max_elev = np.min(dem_clip), np.max(dem_clip)
     num_elev_bins = math.ceil((max_elev - min_elev) / elevation_band_resolution)
@@ -238,6 +256,9 @@ def check_DEM_resolution(dem_clip, elevation_band_resolution):
 def get16bit(array):
     """
     Converts array into numpy 16 bit integer
+
+    Args:
+        array:  array in meters to convert into 16bits centimeters
     """
     id_nans = array == -9999
     array_cm = np.round(array,2) * 100
@@ -269,6 +290,11 @@ def update_meta_from_json(file_path_json):
     unable to retain with json.dump as it is not "serializable
     basically pass epsg number <int> to affine.Affine and replace
     value in metadata with output
+
+    args:
+        file_path_json:     in this case, with metadata
+    returns:
+        meta_orig:          updated metadata
     """
     with open(file_path_json) as json_file:
         meta_orig = json.load(json_file)
