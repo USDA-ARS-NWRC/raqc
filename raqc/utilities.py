@@ -90,8 +90,8 @@ def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
 
     min_extents = [left_max_bound, bottom_max_bound, right_min_bound, \
                             top_min_bound]
-
-    return topo_rez_same, extents_same, min_extents
+    rez = [rez, rez2, rez3]
+    return topo_rez_same, extents_same, min_extents, rez
 
 def evenly_divisible_extents(coord, rez):
     """

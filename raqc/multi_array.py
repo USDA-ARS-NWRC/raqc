@@ -151,7 +151,7 @@ class MultiArrayOverlap(object):
             remove_clipped_files:   UserConfig option to delete clipped file
         """
 
-        topo_rez_same, extents_same, min_extents = prep_coords( \
+        topo_rez_same, extents_same, min_extents, rez13 = prep_coords( \
                 self.file_path_dataset1, self.file_path_dataset2, \
                 self.file_path_topo, 'dem')
 
@@ -219,14 +219,14 @@ class MultiArrayOverlap(object):
             '\nIt will be resized to fit the resolution repeat arrays.'
             '\nTopo spatial resolution = {0}    &   repeat arrays resolution = {1}'
             '\n Your input files will NOT be changed{2}\n') \
-            .format(rez3, rez, '--'*60))
+            .format(rez13[2], rez[0], '--'*60))
 
             run_arg1 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}' \
-                        .format(round(rez), self.file_path_topo, \
+                        .format(round(rez[0]), self.file_path_topo, \
                         self.file_name_base + '_dem.tif')
 
             run_arg1b ='gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":veg_height {2}' \
-                        .format(round(rez), self.file_path_topo, \
+                        .format(round(rez[0]), self.file_path_topo, \
                         self.file_name_base + '_veg_height.tif')
 
         # START Clipping
