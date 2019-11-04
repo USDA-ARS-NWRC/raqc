@@ -1064,9 +1064,10 @@ class Flags(MultiArrayOverlap, PatternFilters):
         """
         print('entering flag_elevation_blocks')
         # Masking bare ground areas because zero change in snow depth will skew distribution from which thresholds are based
-        dem_clip_masked = self.dem_clip[self.mask_nan_snow_present]
-        mat_diff_norm_masked = self.mat_diff_norm[self.mask_nan_snow_present]
-        mat_diff_masked = self.mat_diff[self.mask_nan_snow_present]
+        mask = self.mask_nan_snow_present
+        dem_clip_masked = self.dem_clip[mask]
+        mat_diff_norm_masked = self.mat_diff_norm[mask]
+        mat_diff_masked = self.mat_diff[mask]
 
         # Will need self.elevation_edges from snowline() if hypsometry has not been run yet
         if hasattr(self, 'snowline_elev'):
@@ -1077,9 +1078,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
         id_dem = np.digitize(dem_clip_masked, self.elevation_edges) -1  #creates bin edge ids.  the '-1' converts to index starting at zero
         id_dem[id_dem == self.elevation_edges.shape[0]]  = self.elevation_edges.shape[0] - 1 #for some there are as many bins as edges.  this smooshes last bin(the max) into second to last bin edge
         id_dem_unique = np.unique(id_dem)  #unique ids
-        map_id_dem = np.full(self.mask_nan_snow_present.shape, id_dem_unique[-1] + 1, dtype = np.uint8)  # makes nans max(id_dem) + 1
-        map_id_dem[self.mask_nan_snow_present] = id_dem
-        map_id_dem_overlap = map_id_dem[self.mask_nan_snow_present]
+        map_id_dem = np.full(mask.shape, id_dem_unique[-1] + 1, dtype = np.uint8)  # makes nans max(id_dem) + 1
+        map_id_dem[mask] = id_dem
+        map_id_dem_overlap = map_id_dem[mask]
 
         # Find threshold values per elevation band - 1D array
         thresh_upper_norm = np.zeros(id_dem_unique.shape, dtype = np.float16)
@@ -1099,7 +1100,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
             # elevation_std[id] = getattr(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], 'std')()
 
         # Place threshold values in appropriate elevation bin onto map - 2D array.  Used to find elevation based outliers
-        thresh_upper_norm_array = np.zeros(self.mask_nan_snow_present.shape, dtype=np.float16)
+        thresh_upper_norm_array = np.zeros(mask.shape, dtype=np.float16)
         thresh_lower_norm_array = thresh_upper_norm_array.copy()
         thresh_upper_raw_array = thresh_upper_norm_array.copy()
         thresh_lower_raw_array = thresh_upper_norm_array.copy()
@@ -1118,9 +1119,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
         # Combine outliers from mat_diff, mat_diff_norm or both mats accoring to UserConfig
         # Dictionary to translate values from UserConfig
 
-        keys_local = {'loss' : {'operator' : 'less', 'flag' : 'flag_elevation_loss',
+        keys_local = {'loss' : {'operator' : 'less_equal', 'flag' : 'flag_elevation_loss',
                         'mat_diff_norm' : thresh_lower_norm_array, 'mat_diff' : thresh_lower_raw_array},
-                'gain' : {'operator' : 'greater', 'flag' : 'flag_elevation_gain',
+                'gain' : {'operator' : 'greater_equal', 'flag' : 'flag_elevation_gain',
                         'mat_diff_norm' : thresh_upper_norm_array, 'mat_diff' : thresh_upper_raw_array}}
 
         flag_options = ['loss', 'gain']
@@ -1135,7 +1136,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 elevation_thresh_array = keys_local[elevation_flag_name][mat_name]  # yields thresh_..._array
                 temp_out = getattr(np, keys_local[elevation_flag_name]['operator'])(diff_mat, elevation_thresh_array) & temp_out_init
                 temp_out_init = temp_out.copy()
-            temp_out_init[~self.mask_nan_snow_present] = False
+            temp_out_init[~mask] = False
 
             # Moving Window:
             # Finds pixels idenfied as outliers (temp_out_init) which have a minimum number of neighbor outliers within moving window
