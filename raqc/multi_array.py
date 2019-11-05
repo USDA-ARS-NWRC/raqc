@@ -14,7 +14,7 @@ import affine
 from memory_profiler import profile
 from .utilities import prep_coords, get_elevation_bins, check_DEM_resolution, \
                         evenly_divisible_extents, get16bit, update_meta_from_json, \
-                        apply_dict
+                        apply_dict, create_clipped_file_names
 from tabulate import tabulate
 import pandas as pd
 
@@ -118,12 +118,17 @@ class MultiArrayOverlap(object):
                 '\n please ensure that both are either clipped or the original \n')
             sys.exit('program will exit for user to fix problem ---')
 
+        # creates file paths for clippeds snow date and topo.nc-derived files
+        self.file_path_date1_te, self.file_path_date2_te = \
+            create_clipped_file_names(self.file_path_out_base,
+                                        file_path_dataset1, file_path_dataset2)
         # clipped (common_extent) topo derived files must also be in directory
-        file_path_dem = self.file_name_base + '_dem_common_extent.tif'
-        file_path_veg = self.file_name_base + '_veg_height_common_extent.tif'
+        self.file_path_dem_te = self.file_name_base + '_dem_common_extent.tif'
+        self.file_path_veg_te = self.file_name_base + '_veg_height_common_extent.tif'
 
         if self.already_clipped:
-            if not (os.path.isfile(file_path_dem) & os.path.isfile(file_path_veg)):
+            if not (os.path.isfile(self.file_path_dem_te) & \
+                    os.path.isfile(self.file_path_veg_te)):
                 print(('{0}_dem_common_extent and \n{0}_veg_height_common_extent'
                 '\nmust exist to pass clipped files directly in UserConfig').format(self.file_name_base))
 
@@ -132,13 +137,41 @@ class MultiArrayOverlap(object):
             else:
                 self.file_path_date1_clipped = file_path_dataset1
                 self.file_path_date2_clipped = file_path_dataset2
-                self.file_name_dem = self.file_name_base + '_dem_common_extent.tif'
-                # self.file_name_veg = self.file_name_base + '_veg_common_extent.tif'
-                        #
+                self.file_name_dem_clipped = self.file_path_dem_te
+
+        # check if clipped files already exist before clipping
+        # i.e. user passsed orig file in UserConfig, but clipped files EXIST
         if not self.already_clipped:
-            self.file_path_dataset1 = file_path_dataset1
-            self.file_path_dataset2 = file_path_dataset2
-            self.file_path_topo = file_path_topo
+            # check for existence of clipped snow files
+            if os.path.isfile(self.file_path_date1_te) & os.path.isfile \
+                              (self.file_path_date2_te):
+                print('\nFiles passed in UserConfig were original snow dept files \
+                \nhowever clipped files were detected in file path.\
+                \nNo new files need to be created; existing clipped files will \
+                \nbe used\n')
+                # check for existence of clipped dem and veg from topo.nc
+                if (os.path.isfile(self.file_path_dem_te) & \
+                    os.path.isfile(self.file_path_veg_te)):
+                    topo_clip_present = True
+                else:
+                    topo_clip_present = False
+                    print(('However: \
+                    \n{0}_dem_common_extent and \
+                    \n{0}_veg_height_common_extent \
+                    \nmust exist in order to use clipped files. \
+                    \nRun will proceed, and original snow depth and topo files \
+                    \nwill be clipped (original files will be retained)\n').
+                    format(self.file_name_base))
+                # set file paths and indicate if clipped using self.already_clipped
+                if topo_clip_present:
+                    self.file_path_date1_clipped = self.file_path_date1_te
+                    self.file_path_date2_clipped = self.file_path_date2_te
+                    self.file_name_dem_clipped = self.file_path_dem_te
+                    self.already_clipped = True
+                if not topo_clip_present:
+                    self.file_path_dataset1 = file_path_dataset1
+                    self.file_path_dataset2 = file_path_dataset2
+                    self.file_path_topo = file_path_topo
 
     # @profile
     def clip_extent_overlap(self, remove_clipped_files):
@@ -170,47 +203,26 @@ class MultiArrayOverlap(object):
             json_dict.update({'crs' : crs_object})
             json.dump(json_dict, outfile)
 
-        # Create file paths and names
-        file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
-                                    (self.file_path_dataset1).split('/')[-1])[0]
-        #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
-        id_date_start = file_name_date1_te_temp.index('2')
-        # grab file name bits from both dates to join into descriptive name
-        file_name_date1_te_first = os.path.splitext \
-                                    (file_name_date1_te_temp)[0][:id_date_start + 8]
-        file_name_date1_te_second = os.path.splitext \
-                                    (file_name_date1_te_temp)[0][id_date_start:]
-        file_name_date2_te_temp = os.path.splitext(os.path.expanduser \
-                                    (self.file_path_dataset2).split('/')[-1])[0]
-        file_name_date2_te_first = os.path.splitext \
-                                    (file_name_date2_te_temp)[0][:id_date_start + 8]
-        file_name_date2_te_second = os.path.splitext \
-                                    (file_name_date2_te_temp)[0][id_date_start:]
-        # ULTIMATELY what is used as file paths
-        file_path_date1_te = os.path.join(self.file_path_out_base, \
-                                            file_name_date1_te_first + '_clipped_to_' + \
-                                            file_name_date2_te_second + '.tif')
-        file_path_date2_te = os.path.join(self.file_path_out_base, \
-                                            file_name_date2_te_first + '_clipped_to_' +  \
-                                            file_name_date1_te_second + '.tif')
+        file_path_dem_te = self.file_name_base + '_dem_common_extent.tif'
+        file_path_veg_te = self.file_name_base + '_veg_height_common_extent.tif'
+        file_path_dem = self.file_name_base + '_dem.tif'
+        file_path_veg = self.file_name_base + '_veg.tif'
 
         # list of clipped files that are created in below code
         # files deleted upon UserConfig preference
         self.remove_clipped_files = remove_clipped_files
-        self.new_file_list = [file_path_date1_te, file_path_date2_te, \
-                            self.file_name_base + '_dem_common_extent.tif', \
-                            self.file_name_base + '_veg_height_common_extent.tif']
+        self.new_file_list = [self.file_path_date1_te, self.file_path_date2_te, \
+                                file_path_dem_te, file_path_veg_te]
 
         # Create strings to run as os.run commands
 
         # Pull veg and dem from topo.nc and save as .tif
         if topo_rez_same:
             run_arg1 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format \
-                        (self.file_path_topo, self.file_name_base + '_dem.tif')
+                        (self.file_path_topo, file_path_dem)
 
             run_arg1b = 'gdal_translate -of GTiff NETCDF:"{0}":veg_height {1}' \
-                        .format(self.file_path_topo, self.file_name_base +
-                        '_veg_height.tif')
+                        .format(self.file_path_topo, file_path_veg)
 
         # If spatial resolution of DEM differs from snow
         # Pull veg and dem from topo.nc, rescale and save as .tif
@@ -223,30 +235,30 @@ class MultiArrayOverlap(object):
 
             run_arg1 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}' \
                         .format(round(rez[0]), self.file_path_topo, \
-                        self.file_name_base + '_dem.tif')
+                        file_path_dem)
 
             run_arg1b ='gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":veg_height {2}' \
                         .format(round(rez[0]), self.file_path_topo, \
-                        self.file_name_base + '_veg_height.tif')
+                        file_path_veg)
 
         # START Clipping
         if not extents_same:
             # if date1, date2 and topo have different extents  ---> clip
             run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
                         (*min_extents, self.file_path_dataset1, \
-                        file_path_date1_te) + ' -overwrite'
+                        self.file_path_date1_te) + ' -overwrite'
 
             run_arg3 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
                         (*min_extents, self.file_path_dataset2, \
-                        file_path_date2_te) + ' -overwrite'
+                        self.file_path_date2_te) + ' -overwrite'
 
             run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                        (*min_extents, self.file_name_base + '_dem.tif', \
-                        self.file_name_base + '_dem_common_extent.tif -overwrite')
+                        (*min_extents, file_path_dem, \
+                        self.file_path_dem_te + ' -overwrite')
 
             run_arg4b = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format( \
-                        *min_extents, self.file_name_base + '_veg_height.tif', \
-                        self.file_name_base + '_veg_height_common_extent.tif -overwrite')
+                        *min_extents, file_path_veg, \
+                        self.file_path_veg_te + ' -overwrite')
 
         else:
             # if date1, date2 and topo.nc are the same extents, don't waste time
@@ -256,15 +268,11 @@ class MultiArrayOverlap(object):
             but is the same')
 
             run_arg2 = 'cp {} {}'.format(self.file_path_dataset1,
-                        file_path_date1_te)
+                        self.file_path_date1_te)
             run_arg3 = 'cp {} {}'.format(self.file_path_dataset2,
-                        file_path_date2_te)
-            run_arg4 = 'cp {} {}'.format(self.file_name_base + \
-                        '_dem.tif', self.file_name_base + \
-                        '_dem_common_extent.tif -overwrite')
-            run_arg4b = 'cp {} {}'.format(self.file_name_base + \
-                        '_veg_height.tif', self.file_name_base + \
-                        '_veg_height_common_extent.tif -overwrite')
+                        self.file_path_date2_te)
+            run_arg4 = 'cp {} {} {}'.format(file_path_dem, self.file_path_dem_te, '-overwrite')
+            run_arg4b = 'cp {} {} {}'.format(file_path_veg, self.file_path_veg_te, '-overwrite')
 
         run(run_arg1, shell=True)
         run(run_arg1b, shell=True)
@@ -274,21 +282,14 @@ class MultiArrayOverlap(object):
         run(run_arg4b, shell = True)
 
         # remove unneeded files
-        run_arg5 = 'rm ' + self.file_name_base + '_dem.tif'
-        run_arg5b = 'rm ' + self.file_name_base + '_veg_height.tif'
+        run_arg5 = 'rm ' + file_path_veg
+        run_arg5b = 'rm ' + file_path_veg
         run(run_arg5, shell = True)
         run(run_arg5b, shell = True)
 
-        # If clipped, save filepath as these
-        if not extents_same:
-            self.file_path_date1_clipped = file_path_date1_te
-            self.file_path_date2_clipped = file_path_date2_te
-            self.file_name_dem = self.file_name_base + '_dem_common_extent.tif'
-        # if not clipped, use original file
-        else:
-            self.file_path_date1_clipped = self.file_path_date1
-            self.file_path_date2_clipped = self.file_path_date2
-            self.file_name_dem = self.file_name_base + '_dem_common_extent.tif'
+        self.file_path_date1_clipped = self.file_path_date1_te
+        self.file_path_date2_clipped = self.file_path_date2_te
+        self.file_name_dem_clipped = self.file_path_dem_te
 
     # @profile
     def mask_basic(self):
@@ -407,7 +408,7 @@ class MultiArrayOverlap(object):
             mat_clip2[np.isnan(mat_clip2)] = -9999
             mat_clip2 = get16bit(mat_clip2)
             self.mat_clip2 = mat_clip2.copy()
-        with rio.open(self.file_name_dem) as src:
+        with rio.open(self.file_name_dem_clipped) as src:
             topo_te = src
             dem_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
             dem_clip = dem_clip[0]
@@ -1065,7 +1066,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.snowline_elev = elevation_edges[id_min]  #elevation of estimated snowline
 
         # Open veg layer from topo.nc and identify pixels with veg present (veg_height > 5)
-        with rio.open(self.file_name_base + '_veg_height_common_extent.tif') as src:
+        with rio.open(self.file_path_veg_te) as src:
             topo_te = src
             veg_height_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
             self.veg_height_clip = veg_height_clip[0]
