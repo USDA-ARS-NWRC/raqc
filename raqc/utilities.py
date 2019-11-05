@@ -1,3 +1,4 @@
+import os
 import rasterio as rio
 import time
 import numpy as np
@@ -248,7 +249,6 @@ def check_DEM_resolution(dem_clip, elevation_band_resolution):
                 print('must enter a float or integer')
             else:
                 if response > min_elev_band_rez:
-                    self.min_elev_band_rez = response
                     print('your new elevation_band_resolution will be: {}. Note that this will NOT be reflected on your backup_config.ini file'.format(response))
                     break
                 else:
@@ -302,3 +302,31 @@ def update_meta_from_json(file_path_json):
     transform_object = affine.Affine(*meta_orig['transform'][:6])
     meta_orig.update({'crs' : crs_object, 'transform' : transform_object})
     return(meta_orig)
+
+def create_clipped_file_names(file_path_out_base, file_path_dataset1,
+                                file_path_dataset2):
+    # Create file paths and names
+    file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
+                                (file_path_dataset1).split('/')[-1])[0]
+    #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
+    id_date_start = file_name_date1_te_temp.index('2')
+    # grab file name bits from both dates to join into descriptive name
+    file_name_date1_te_first = os.path.splitext \
+                                (file_name_date1_te_temp)[0][:id_date_start + 8]
+    file_name_date1_te_second = os.path.splitext \
+                                (file_name_date1_te_temp)[0][id_date_start:]
+    file_name_date2_te_temp = os.path.splitext(os.path.expanduser \
+                                (file_path_dataset2).split('/')[-1])[0]
+    file_name_date2_te_first = os.path.splitext \
+                                (file_name_date2_te_temp)[0][:id_date_start + 8]
+    file_name_date2_te_second = os.path.splitext \
+                                (file_name_date2_te_temp)[0][id_date_start:]
+    # ULTIMATELY what is used as file paths
+    file_path_date1_te = os.path.join(file_path_out_base, \
+                                        file_name_date1_te_first + '_clipped_to_' + \
+                                        file_name_date2_te_second + '.tif')
+    file_path_date2_te = os.path.join(file_path_out_base, \
+                                        file_name_date2_te_first + '_clipped_to_' +  \
+                                        file_name_date1_te_second + '.tif')
+
+    return(file_path_date1_te, file_path_date2_te)
