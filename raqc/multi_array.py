@@ -14,14 +14,15 @@ import affine
 from memory_profiler import profile
 from .utilities import prep_coords, get_elevation_bins, check_DEM_resolution, \
                         evenly_divisible_extents, get16bit, update_meta_from_json, \
-                        apply_dict, create_clipped_file_names
+                        apply_dict, create_clipped_file_names, format_date
 from tabulate import tabulate
 import pandas as pd
+import datetime
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
                 file_out_root, basin, file_name_modifier,
-                elevation_band_resolution):
+                elevation_band_resolution, file_path_snownc):
         """
         Initiate self and add attributes needed throughout RAQC run.
         Ensure dates are in chronological order.
@@ -61,7 +62,17 @@ class MultiArrayOverlap(object):
         year1 = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
         year2 = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
         self.file_path_out_base = os.path.join(file_out_root, basin, year1 + '_' + year2)
-
+        # find modelled snow depth one day prior to lidar update
+        snownc_date2 = format_date(year2)
+        snownc_date2 -= datetime.timedelta(days = 1)
+        snownc_date2 = snownc_date2.strftime("%Y%m%d")
+        # paths to snow.nc files used to if basin is gaining or losing snow
+        # between flights
+        self.file_path_snownc1 = os.path.join(file_path_snownc, \
+                                            'run' + year1, 'snow.nc')
+        self.file_path_snownc2 = os.path.join(file_path_snownc, \
+                                            'run' + snownc_date2, 'snow.nc')
+        print(self.file_path_snownc1)
         if not os.path.exists(self.file_path_out_base):
             os.makedirs(self.file_path_out_base)
 
@@ -424,7 +435,12 @@ class MultiArrayOverlap(object):
         mat_diff_norm = np.round((mat_diff / mat_clip1), 2)  #
         self.mat_diff_norm = np.ndarray.astype(mat_diff_norm, np.float16)
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
-
+    def determine_basin_change(self, band):
+        snownc_file_open_rio = 'netcdf:{0}:{1}'.format(self.file_path_snownc1, band)
+        with rio.open(snownc_file_open_rio) as src:
+            snownc1_obj = src
+            snownc1 = snownc1_obj.read()
+        plt.subplot(nrow=1, ncol=1)
     # @profile
     def get_buffer(self):
         """
@@ -764,13 +780,14 @@ class PatternFilters():
 
 class Flags(MultiArrayOverlap, PatternFilters):
     def init(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-            file_out_root, basin, file_name_modifier, elevation_band_resolution):
+            file_out_root, basin, file_name_modifier, elevation_band_resolution,
+            file_path_snownc):
         """
         Protozoic attempt of use of inheritance
         """
         MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2,
                                 file_path_topo, file_out_root, basin,
-                                file_name_modifier)
+                                file_name_modifier, file_path_snownc)
 
     # @profile
     def make_histogram(self, name, nbins, thresh, moving_window_size):
@@ -874,8 +891,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
     # @profile
     def flag_elevation_blocks(self, apply_moving_window, moving_window_size,
-            neighbor_threshold, snowline_threshold, outlier_percentiles,
-            elevation_thresholding):
+            neighbor_threshold, snowline_threshold, outlier_percentiles):
         """
         More potential for precision than flag_basin_blocks function.  Finds outliers
         in relation to their elevation bands for snow gain and loss and adds as attributed
@@ -897,9 +913,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                     Percentiles used to threshold each elevation band.  i.e. 95 in (95,80,10,10) is the raw gain upper,
                                     which means anything greater than the 95th percentile of raw snow gain in each elevatin band will
                                     be flagged as an outlier.
-            elevation_thresholding:  string. A one or two item list indicating whether to
-                                     use diff and/or diff_norm to threshold the
-                                     elevation flags
+
         Output:
             flag_elevation_loss:  attribute
             flag_elevation_gain   attribute
@@ -971,32 +985,39 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
         # Combine outliers from mat_diff, mat_diff_norm or both mats accoring to UserConfig
         # Dictionary to translate values from UserConfig
-        keys_local = {'loss' : {'operator' : 'less', 'flag' : 'flag_elevation_loss',
-                        'mat_diff_norm' : thresh_lower_norm_array, 'mat_diff' : thresh_lower_raw_array},
-                'gain' : {'operator' : 'greater', 'flag' : 'flag_elevation_gain',
-                        'mat_diff_norm' : thresh_upper_norm_array, 'mat_diff' : thresh_upper_raw_array}}
+        keys_local = {'loss' : {'operator' : 'less',
+                                'flag' : 'flag_elevation_loss',
+                                'mat_diff_norm' : thresh_lower_norm_array,
+                                'mat_diff' : thresh_lower_raw_array},
+                    'gain' : {'operator' : 'greater',
+                                'flag' : 'flag_elevation_gain',
+                                'mat_diff_norm' : thresh_upper_norm_array,
+                                'mat_diff' : thresh_upper_raw_array}}
 
-        flag_options = ['loss', 'gain']
+        basin_change = ['loss', 'gain']
         shape_temp = getattr(np, 'shape')(getattr(self, 'mat_diff'))
-
-        for i in range(len(elevation_thresholding)):
+        diff_mats = [['mat_diff', 'mat_diff_norm'], ['mat_diff', 'mat_diff_norm']]
+        for id, basin_change in enumerate(basin_change):
+            # initiate ones array to be used for conditional and/or overlapping
+            # of diff and diff_norm outliers
             temp_out_init = np.ones(shape = shape_temp, dtype = bool)
-            elevation_flag_name = flag_options[i]
-            for mat_name in elevation_thresholding[i]:
+            for diff_mat_name in diff_mats[id]:
                 # this translates UserConfig name to name (string) used here:
                 # i.e. difference = mat_diff and vice/versa
-                mat_name = self.keys_master['config_to_mat_object'][mat_name]
-                diff_mat = getattr(self, mat_name)
-                elevation_thresh_array = keys_local[elevation_flag_name][mat_name]  # yields thresh_..._array
-                temp_out = getattr(np, keys_local[elevation_flag_name]['operator'])(diff_mat, elevation_thresh_array) & temp_out_init
+                diff_mat = getattr(self, diff_mat_name)
+                elevation_thresh_array = keys_local[basin_change][diff_mat_name]  # yields thresh_..._array
+                # finds cells exceeding elevation band thresholds
+                temp_out = getattr(np, keys_local[basin_change]['operator'])(diff_mat, elevation_thresh_array) & temp_out_init
                 temp_out_init = temp_out.copy()
             # remove flags below 'snowline'
             temp_out_init[~self.mask_nan_snow_present] = False
 
-            # Moving Window:
-            # Finds pixels idenfied as outliers (temp_out_init) which have a minimum number of neighbor outliers within moving window
-            # Note: the '& temp_out_init' ensures that ONLY pixels originally classified as outliers are kept
-            flag_name = keys_local[elevation_flag_name]['flag']
+            # MOVING WINDOW:
+            # Finds pixels idenfied as outliers (temp_out_init) which have a
+            # minimum number of neighbor outliers within moving window
+            # Note: the '& temp_out_init' ensures that ONLY pixels originally
+            # classified as outliers are kept
+            flag_name = keys_local[basin_change]['flag']
             if apply_moving_window:
                 pct = self.mov_wind2(temp_out_init, moving_window_size)
                 temp_out_init = (pct > neighbor_threshold) & temp_out_init
@@ -1013,7 +1034,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
         # Save dataframe of elevation band satistics on thresholds
         # Simply preparing the column names in a syntactically shittilly readable format:
-        column_names = ['elevation', '{}% change (m)', '{}% change (norm)', '{}% change (m)', '{}% change (norm)', '50% change (m)', 'elevation_count']
+        column_names = ['elevation', '{}% change (m)', '{}% change (norm)',
+                        '{}% change (m)', '{}% change (norm)', '50% change (m)',
+                         'elevation_count']
         column_names_temp = []
         ct = 0
         for names in column_names:
@@ -1022,8 +1045,10 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 ct += 1
             column_names_temp.append(names)
 
-        temp = np.stack((elevation_edges[id_dem_unique], thresh_upper_raw.ravel(), thresh_upper_norm.ravel(),
-                thresh_lower_raw.ravel(), thresh_lower_norm.ravel(), median_raw.ravel(), elevation_count.ravel()), axis = -1)
+        temp = np.stack((elevation_edges[id_dem_unique], thresh_upper_raw.ravel(),
+                        thresh_upper_norm.ravel(), thresh_lower_raw.ravel(),
+                        thresh_lower_norm.ravel(), median_raw.ravel(),
+                        elevation_count.ravel()), axis = -1)
         temp = np.around(temp, 2)
         df = pd.DataFrame(temp, columns = column_names_temp)
         df.to_csv(path_or_buf = self.file_path_out_csv, index=False)
@@ -1082,38 +1107,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
                 '\nwith a mean snow depth >= {1}.'
                 ' \nElevation bands were in {2}m increments ').
                 format(self.snowline_elev, snowline_threshold, self.elevation_band_resolution))
-
-    def flag_tree_blocks(self, logic):
-
-        """
-        These are cells with EITHER flag_elevation_gain/loss AND/OR
-        flag_basin_bain/loss with trees present.
-        Tree presense is determined from topo.nc vegetation band.
-
-        Args:
-            logic:  tree_loss and tree_gain UserConfig values i.e. use elevation,
-                    basin, and, or
-        """
-
-        key = {'loss' : {'basin' : 'flag_basin_loss', 'elevation' : 'flag_elevation_loss', 'flag_tree_name' : 'flag_tree_loss'},
-                'gain' : {'basin' : 'flag_basin_gain', 'elevation' : 'flag_elevation_gain', 'flag_tree_name' : 'flag_tree_gain'}}
-
-        flag_options = ['loss', 'gain']
-
-        # get basin and elevation flags if requested
-        for i, logic in enumerate(logic):
-            tree_flag_name = key[flag_options[i]]['flag_tree_name']
-            temp_basin = getattr(self, key[flag_options[i]]['basin'])
-            temp_elevation = getattr(self, key[flag_options[i]]['elevation'])
-
-            if logic == 'or':
-                setattr(self, tree_flag_name, (temp_basin | temp_elevation) & self.veg_presence)
-            elif logic == 'and':
-                setattr(self, tree_flag_name, (temp_basin & temp_elevation) & self.veg_presence)
-            elif logic == 'basin':
-                setattr(self, tree_flag_name, temp_basin & self.veg_presence)
-            elif logic == 'elevation':
-                setattr(self, tree_flag_name, temp_elevation & self.veg_presence)
 
     def stats_report(self, flags):
         map_id_dem, id_dem_unique, elevation_edges = \

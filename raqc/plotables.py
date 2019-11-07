@@ -111,8 +111,8 @@ class Plotables:
 
         if zeros == 0:  # this sets zero to white, BUT stretches with large data value range
             colorsbad = np.array([[0,0,0,0]])
-            # colors1 = cmocean.cm.matter_r(np.linspace(0., 1, 255))
-            colors1 = plt.cm.gist_stern(np.linspace(0., 1, 255))
+            colors1 = cmocean.cm.matter_r(np.linspace(0., 1, 255))
+            # colors1 = plt.cm.gist_stern(np.linspace(0., 1, 255))
             colors = np.vstack((colorsbad, colors1))
             mymap = mcolors.LinearSegmentedColormap.from_list('my_colormap', colors)
             mymap.set_bad('gray', 1)

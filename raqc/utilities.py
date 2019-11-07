@@ -5,6 +5,7 @@ import numpy as np
 import math
 import json
 import affine
+import datetime
 
 def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
     """
@@ -305,6 +306,18 @@ def update_meta_from_json(file_path_json):
 
 def create_clipped_file_names(file_path_out_base, file_path_dataset1,
                                 file_path_dataset2):
+    """
+    Create file names for clipped snow depth files.
+    Note: these are just the file names, files are not yet created
+
+    Args:
+        file_path_out_base:     base path from which to join clipped files
+        file_path_dataset1:     file path original snow depth date1
+        file_path_dataset2:     file path original snow depth date2
+    Returns:
+        file_path_date1_te:     file path of date1 clipped file
+        file_path_date2_te:     file path of date2 clipped file
+    """
     # Create file paths and names
     file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
                                 (file_path_dataset1).split('/')[-1])[0]
@@ -330,3 +343,32 @@ def create_clipped_file_names(file_path_out_base, file_path_dataset1,
                                         file_name_date1_te_second + '.tif')
 
     return(file_path_date1_te, file_path_date2_te)
+
+def format_date(date_string):
+    """
+    short, cheap function to convert string to datetime
+    """
+    year = int(date_string[:4])
+    month = int(date_string[4:6])
+    day = int(date_string[6:8])
+    datetime_obj = datetime.date(year, month, day)
+    return datetime_obj
+
+def determine_basin_change(snownc1, snownc2):
+    """
+    First pass (nod to Mark for the term) at determining if basin lost or
+    gained snow.
+    Args:
+        snownc1:    array from model run of date 1
+        snownc2:    array from model run one day prior to date 2.  This assures
+                    the lidar update is not included
+    Returns:
+        gain:       True if basin gained snow.  False if basin lost snow.
+    """
+    diff = snownc2 - snownc1
+    basin_diff = np.sum(diff)
+    if basin_diff > 0:
+        gain = True
+    else:
+        gain = False
+    return gain
