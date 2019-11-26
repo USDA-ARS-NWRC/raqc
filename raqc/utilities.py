@@ -1,4 +1,7 @@
 import os
+import logging
+# solution to almost eliminating Rastrio logging to log file
+logging.getLogger('rasterio').setLevel(logging.WARNING)
 import rasterio as rio
 import time
 import numpy as np
@@ -6,6 +9,9 @@ import math
 import json
 import affine
 import datetime
+import matplotlib.pyplot as plt
+from . import plotables as pltz
+from snowav.utils.MidpointNormalize import MidpointNormalize
 
 def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
     """
@@ -155,7 +161,7 @@ def bounds_to_pix_coords(bound, rez, location):
 def rasterio_netCDF(file_path):
     """
     A quick standalone demonstration on what rasterio vs. netCDF4 provides in
-    terms of bounds.
+    terms of bounds. Used in development and saved just in case...
     """
     from netCDF4 import Dataset
     from tabulate import tabulate
@@ -334,7 +340,7 @@ def create_clipped_file_names(file_path_out_base, file_path_dataset1,
                                 (file_name_date2_te_temp)[0][:id_date_start + 8]
     file_name_date2_te_second = os.path.splitext \
                                 (file_name_date2_te_temp)[0][id_date_start:]
-    # ULTIMATELY what is used as file paths
+    # ULTIMATELY what is used as file pathsrez = meta['transform']
     file_path_date1_te = os.path.join(file_path_out_base, \
                                         file_name_date1_te_first + '_clipped_to_' + \
                                         file_name_date2_te_second + '.tif')
@@ -348,13 +354,66 @@ def format_date(date_string):
     """
     short, cheap function to convert string to datetime
     """
+    if isinstance(date_string, int):
+        date_string = str(date_string)
+
     year = int(date_string[:4])
     month = int(date_string[4:6])
     day = int(date_string[6:8])
     datetime_obj = datetime.date(year, month, day)
     return datetime_obj
 
-def determine_basin_change(snownc1, snownc2):
+def snowline(dem, basin_mask, elevation_band_resolution, depth1, depth2, \
+                snowline_threshold):
+    """
+    Finds the snowline based on the snowline_threshold. The lowest elevation
+    band with a mean snow depth >= the snowline threshold is set as the snowline.
+    This value is later used to discard outliers below snowline.
+
+    Args:
+        snowline_threshold:     Minimum average snow depth within elevation band,
+                                which defines snowline_elev.  In Centimeters
+    Returns:
+        snowline_elev:      Lowest elevation where snowline_threshold is
+                            first encountered
+    """
+
+    map_id_dem, id_dem_unique, elevation_edges = \
+        get_elevation_bins(dem, basin_mask, \
+                            elevation_band_resolution)
+
+    # initiate lists (<numpy arrays>) used to determine snowline
+    snowline_mean = np.full(id_dem_unique.shape, -9999, dtype = 'float')
+    # use the matrix with the deepest mean basin snow depth to determine
+    # snowline thresh,  assuming deeper avg basin snow = lower snowline
+    if np.mean(depth2[basin_mask]) > np.mean(depth1[basin_mask]):
+        #this uses date1 to find snowline
+        mat_temp = depth1
+        mat = mat_temp[basin_mask]
+    else:
+        #this uses date2 to find snowline
+        mat_temp = depth2
+        mat = mat_temp[basin_mask]
+    # Calculate mean for pixels with no nan (nans create errors)
+    # in each of the elevation bins
+    map_id_dem2_masked = map_id_dem[basin_mask]
+    for id, id_dem_unique2 in enumerate(id_dem_unique):
+        snowline_mean[id] = getattr(mat[map_id_dem2_masked == id_dem_unique2], 'mean')()
+    # Find SNOWLINE:  first elevation where snowline occurs
+    id_min = np.min(np.where(snowline_mean > snowline_threshold))
+    snowline_elev = elevation_edges[id_min]  #elevation of estimated snowline
+
+    # # Open veg layer from topo.nc and identify pixels with veg present (veg_height > 5)
+    # with rio.open(self.file_path_veg_te) as src:
+    #     topo_te = src
+    #     veg_height_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
+    #     self.veg_height_clip = veg_height_clip[0]
+    # self.veg_presence = self.veg_height_clip > 5
+
+    return snowline_elev
+
+def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
+                            file_path_base, band):
     """
     First pass (nod to Mark for the term) at determining if basin lost or
     gained snow.
@@ -365,10 +424,95 @@ def determine_basin_change(snownc1, snownc2):
     Returns:
         gain:       True if basin gained snow.  False if basin lost snow.
     """
-    diff = snownc2 - snownc1
-    basin_diff = np.sum(diff)
-    if basin_diff > 0:
-        gain = True
+    import sys
+
+    snownc1_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc1, band)
+    snownc2_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc2, band)
+    topo_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_topo, 'mask')
+
+    date1 = file_path_snownc1.split('/')[-1][3:11]
+    date2 = file_path_snownc2.split('/')[-1][3:11]
+    file_path_out = os.path.join(file_path_base, \
+                'RAQC_modelled_basin_diff_{}_to_{}.png'.format(date1, date1))
+
+    with rio.open(snownc1_file_open_rio) as src:
+        snownc1_obj = src
+        snownc1 = snownc1_obj.read()
+
+    with rio.open(snownc2_file_open_rio) as src:
+        snownc2_obj = src
+        snownc2 = snownc2_obj.read()
+
+    with rio.open(topo_file_open_rio) as src:
+        mask_obj = src
+        mask = mask_obj.read()
+
+    # Get statistics on snow depth change
+    snownc1 = snownc1[0]
+    snownc2 = snownc2[0]
+    mask = mask[0]
+    mask = np.ndarray.astype(mask, np.bool)
+    both_zeros = (np.absolute(snownc1) ==0) & (np.absolute(snownc2) == 0)
+    zeros_and_mask = mask & ~both_zeros
+    temp = snownc2 - snownc1
+    snow_cells = temp[zeros_and_mask]
+
+    basin_total_change = np.sum(snow_cells)
+    basin_area = snow_cells.shape[0]
+    basin_avg_change = round(basin_total_change / basin_area, 2)
+
+    # if clipping map too much, change these perecentiles
+    # for instance from 1 to 0.1 and 99 to 99.9
+    minC = np.nanpercentile(snow_cells, 1)
+    maxC = np.nanpercentile(snow_cells, 99)
+
+    # Now plot change
+    # nans where array mask
+    diff_map = np.full(temp.shape, np.nan)
+    diff_map[mask] = temp[mask]
+    # limits used in colorbar
+    cb_range_lims = [minC, maxC]
+
+    if basin_total_change > 0:
+        basin_gain = True
     else:
-        gain = False
-    return gain
+        basin_gain = False
+
+    pltz_obj = pltz.Plotables()
+    pltz_obj.marks_colors()
+    pltz_obj.cb_readable(cb_range_lims, 'L', 5)
+
+    fig, axes = plt.subplots(nrows = 1, ncols = 1)
+    h = axes.imshow(diff_map, cmap = pltz_obj.cmap_marks, norm=MidpointNormalize(midpoint = 0))
+    axes.axis('off')
+    cbar = fig.colorbar(h, ax=axes, fraction = 0.04, pad = 0.04, \
+            orientation = 'vertical', extend = 'both', ticks = pltz_obj.cb_range)
+    cbar.set_label('\u0394 thickness (m)', rotation=270, labelpad=14)
+    cbar.ax.tick_params(labelsize = 8)
+    h.set_clim(minC, maxC)
+    fig.suptitle('\u0394 snow thickness (m): snow.nc run{}_to_{}'.format(date1, date2))
+    plt.savefig(file_path_out, dpi = 180)
+    return basin_gain, basin_total_change, basin_avg_change
+    # axes.set_xlabel('early date depth (m)')
+    # axes.set_ylabel('relative delta snow depth')
+
+def return_snow_files(file_path_snownc, year1, year2):
+    # Snow.nc file paths
+    # Grab modelled snow depth one day prior to both lidar updates
+    # Returns boolean True if gaining snow, and the net change
+    snownc_date2 = format_date(year2)
+    snownc_date2 -= datetime.timedelta(days = 1)
+    snownc_date2 = snownc_date2.strftime("%Y%m%d")
+
+    # snow.nc file paths to determine if basin is gaining or losing snow depth overall
+    file_path_snownc1 = os.path.join(file_path_snownc, \
+                                        'run' + year1, 'snow.nc')
+    file_path_snownc2 = os.path.join(file_path_snownc, \
+                                        'run' + snownc_date2, 'snow.nc')
+
+    temp_snow1 = '/home/zachuhlmann/projects/data/SanJoaquin/20190614_20190704/run20190613_snow.nc'
+    temp_snow2 = '/home/zachuhlmann/projects/data/SanJoaquin/20190614_20190704/run20190703_snow.nc'
+
+    file_path_snownc1, file_path_snownc2 = temp_snow1, temp_snow2
+
+    return file_path_snownc1, file_path_snownc2

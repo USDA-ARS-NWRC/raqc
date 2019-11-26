@@ -10,7 +10,6 @@ def plot_basic(self, action, file_path_out):
         # print('this is where matplotlib lives: ', matplotlib.matplotlib_fname())s
         pltz_obj = pltz.Plotables()
         pltz_obj.set_zero_colors(1)
-        pltz_obj.marks_colors()
         # print('in plot basic', matplotlib.get_backend())
 
         plt.close(0)
@@ -43,33 +42,3 @@ def plot_basic(self, action, file_path_out):
             plt.savefig(file_path_out, dpi=180)
     else:
         pass
-    # print('type initial ', type(self.bins))
-    # img = scipy.misc.toimage(self.bins, high=np.max(self.bins), low=np.min(self.bins), mode='I')
-    # img.save('/home/zachuhlmann/projects/data/my16bit.png')
-    #
-    # # check that you got the same values
-    # b = scipy.misc.imread('/home/zachuhlmann/projects/data/my16bit.png')
-    # b.dtype
-    # # dtype('int32')
-    # print('do they equal ', np.array_equal(self.bins, b))
-    # # True
-
-
-# mat = self.trim_extent_nan('mat_diff_norm_nans')
-# mat[~self.overlap_nan_trim] = np.nan
-#
-# # Sub3: Basin snow map
-# h = axes[1,0].imshow(mat, origin = 'upper', cmap = pltz_obj.cmap_marks, norm = MidpointNormalize(midpoint = 0))
-# axes[1,0].title.set_text('First date snow depth')
-# cbar = plt.colorbar(h, ax = axes[1,0])
-# cbar.set_label('relative diff (%)')
-#
-# # Sub4: Basin map of clipped snow
-# mat = self.trim_extent_nan('flag_gain_block')
-# mat[~self.overlap_nan_trim] = 0
-# h = axes[1,1].imshow(mat, origin = 'upper')
-# axes[1,1].title.set_text('locations of outliers (n=' + str(np.sum(self.flag_combined )) + ')')
-# axes[1,1].set_xlabel('snow depth (m)')
-# axes[1,1].set_ylabel('relative delta snow depth')
-# self.save_tiff('SJ_multiband2_gain_enforced')
-# # self.save_tiff('outliers_map_space', 'Lakes_06_11_05_01_outliers')

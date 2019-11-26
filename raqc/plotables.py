@@ -5,7 +5,9 @@ import math
 
 class Plotables:
     "this does some stuff"
-    pass
+
+
+
     def cb_readable(self, list_or_array, flag, num_ticks):
         ''' this just gives tick marks plotting '''
         # A = array
@@ -22,25 +24,24 @@ class Plotables:
             mn = list_or_array[0]
             mx = list_or_array[1]
 
+
         val_range = mx - mn
-        tkmn = 1.5   # JUST SET THIS VALUE
-        tkmx = 2 - tkmn
-        cbmn, cbmx = tkmn * 1.2, tkmx *0.8  # these shift cbar tick lims in
-        # If min values are pos or max neg
+
+        shift_multiplier = 0.1
         if mn < 0:
-            tkmn = 2 - tkmn
-            cbmn = tkmn * 0.8
+            mn -= mn * shift_multiplier
+        else:
+            mn += mn * shift_multiplier
         if mx < 0:
-            tkmx = 2 - tkmx
-            cbmx = tkmx * 1.2
+            mx += mx * shift_multiplier
+        else:
+            mx -= mx * shift_multiplier
 
         # Go through val range scenarios
         if val_range < 0.1:
             self.cb_range = np.array([mn, mx])
         else:
-            cb_range = np.linspace(mn*cbmn, mx*cbmx, num_ticks)
-            self.vmin = mn * tkmn
-            self.vmax = mx * tkmx
+            cb_range = np.linspace(mn, mx, num_ticks)
             if val_range < 100*.5:
                 self.cb_range = self.range_cust(cb_range, 1)
             elif val_range < 100*1:
@@ -95,11 +96,15 @@ class Plotables:
         import cmocean
         import copy
 
-        colorsbad = plt.cm.Set1_r(np.linspace(0., 1, 1))
-        colors1 = cmocean.cm.matter_r(np.linspace(0., 1, 127))
-        colors2 = plt.cm.Blues(np.linspace(0, 1, 128))
-        colors = np.vstack((colorsbad,colors1, colors2))
+        #plt.Set1_r is a colormap
+        # np.linspace will pull just one value in this case
+        # colorsbad = plt.cm.Set1_r(np.linspace(0., 1, 1))
+        colorsbad = np.array([0.9, 0.9, 0.9, 1]).reshape((1, 4))
+        colors1 = cmocean.cm.matter_r(np.linspace(0., 1, 126))
+        colors2 = plt.cm.Blues(np.linspace(0, 1, 126))
+        colors = np.vstack((colorsbad, colors1, colorsbad, colorsbad, colors2, colorsbad))
         mymap = mcolors.LinearSegmentedColormap.from_list('my_colormap', colors)
+        mymap.set_bad('white', 1)
         cmap = copy.copy(mymap)
         self.cmap_marks = cmap
 
@@ -116,7 +121,6 @@ class Plotables:
             colors = np.vstack((colorsbad, colors1))
             mymap = mcolors.LinearSegmentedColormap.from_list('my_colormap', colors)
             mymap.set_bad('gray', 1)
-            mymap.set_under('white')
         elif zeros == 1:  # does not alter plt.cm colormap, just sets zero to white when vmin specified
             colors = plt.cm.gist_stern(np.linspace(0., 1, 256))
             mymap = mcolors.LinearSegmentedColormap.from_list('my_colormap', colors)

@@ -9,7 +9,6 @@ from subprocess import check_output
 import argparse
 import copy
 
-
 def main():
 
     parser = argparse.ArgumentParser(description = "running raqc through the command line")
@@ -24,7 +23,7 @@ def main():
     #ensure no errors
     warnings, errors = check_config(ucfg)
     if errors != [] or warnings != []:
-        print_config_report(warnings,errors)
+        print_config_report(warnings, errors)
 
     #checking_later allows not to crash with errors.
     cfg = copy.deepcopy(ucfg.cfg)
@@ -77,7 +76,8 @@ def main():
             'elevation_loss', 'zero_and_nan']
     raqc_obj.stats_report(flags)
     want_plot = cfg['options']['plot']
-    raqc_obj.plot_this(want_plot)
+    # raqc_obj.plot_this(want_plot)
+    raqc_obj.plot_hist(want_plot)
 
     file_out = cfg['paths']['file_path_out']
     include_arrays = cfg['options']['include_arrays']
