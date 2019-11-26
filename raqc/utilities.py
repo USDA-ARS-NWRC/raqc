@@ -340,7 +340,7 @@ def create_clipped_file_names(file_path_out_base, file_path_dataset1,
                                 (file_name_date2_te_temp)[0][:id_date_start + 8]
     file_name_date2_te_second = os.path.splitext \
                                 (file_name_date2_te_temp)[0][id_date_start:]
-    # ULTIMATELY what is used as file pathsrez = meta['transform']
+    # ULTIMATELY what is used as file paths
     file_path_date1_te = os.path.join(file_path_out_base, \
                                         file_name_date1_te_first + '_clipped_to_' + \
                                         file_name_date2_te_second + '.tif')
