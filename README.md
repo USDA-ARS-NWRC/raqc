@@ -19,35 +19,35 @@ To Run:
 --------
 <i>RAQC utilizes a configuration file managed by inicheck (https://github.com/USDA-ARS-NWRC/inicheck).  User must set all parameters here and run throught the command line.</i>
 
-Here is a breakdown of the configuration file(UserConfig) sections and short examples...  
-&nbsp;&nbsp;<i>Note: some options MAY have changed</i>  
-### [difference_arrays]  
-<i>Helps to visualize the 2D histogram when ```[options][interactive_plot] = y```</i>  
-- Clips array from ```[name]``` based on items ```[action]```, ```[operator]``` and ```[value]```.  
+Here is a breakdown of the configuration file(UserConfig) sections and short examples...
+&nbsp;&nbsp;<i>Note: some options MAY have changed</i>
+### [difference_arrays]
+<i>Helps to visualize the 2D histogram when ```[options][interactive_plot] = y```</i>
+- Clips array from ```[name]``` based on items ```[action]```, ```[operator]``` and ```[value]```.
 - The default is ```date1``` depth < 1700cm and ```normalized difference``` < 20 or 2,000%.
--  **ex)** Below config options will create mask date1 depths > 1700 cm, normalized change > 20 or 2,000% and nans from 2D histogram and outliers:  
+-  **ex)** Below config options will create mask date1 depths > 1700 cm, normalized change > 20 or 2,000% and nans from 2D histogram and outliers:
 
 ```[difference_arrays]
 name:                      date1, difference_normalized
 action:                    compare, compare
 operator:                  less_than, greater_than, less_than, greater_than
 value:                      1700, -1, 20, -1.1
-``` 
+```
 
 ### [flags]
 <i>this section enables user to select which flags to include in analysis, whether to apply moving windows when applicable and how to define the construction of each flag.</i>
-- The ```[flags]``` section chooses flags to compute.  If ```basin_block```, ```elevation block``` or ```tree``` is selected, 'loss' and 'gain' flags will be created for each of ```basin```, ```elevation``` or ```tree``` respectively.  
+- The ```[flags]``` section chooses flags to compute.  If ```basin_block```, ```elevation block``` or ```tree``` is selected, 'loss' and 'gain' flags will be created for each of ```basin```, ```elevation``` or ```tree``` respectively.
 &nbsp;&nbsp;**ex)** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
-- ```[elevation_loss]``` and ```[elevation_gain]``` sections specifify whether to use ```difference``` and/or ```difference_normalized```.  If both selected, then logic is for **and** 
+- ```[elevation_loss]``` and ```[elevation_gain]``` sections specifify whether to use ```difference``` and/or ```difference_normalized```.  If both selected, then logic is for **and**
     - i.e. <i>find outliers</i> where **both** ```difference``` & ```difference_normalized``` exceed elevation band thresholds.
 - ```tree``` flag is composed of ```elevation_block``` and/or ```basin_block``` flags, but **only flagged if** <i>vegetation is also present</i> in pixel (<i>currently defined as vegetation_height > 5m from topo.nc</i>).
-- ```[tree_loss]``` and ```[tree_gain]``` are required items if ```[flags][tree]``` is specified.  The ```tree``` flag can combine or use ```elevation``` and ```basin``` flags individually or as compound conditions i.e. ```and``` or ```or```.  Options are ```elevation```, ```basin```, ```or``` or ```and```.  
+- ```[tree_loss]``` and ```[tree_gain]``` are required items if ```[flags][tree]``` is specified.  The ```tree``` flag can combine or use ```elevation``` and ```basin``` flags individually or as compound conditions i.e. ```and``` or ```or```.  Options are ```elevation```, ```basin```, ```or``` or ```and```.
 
 ### [histogram_outliers]
-<i>sets parameters for 2D histogram-space outliers</i>  
+<i>sets parameters for 2D histogram-space outliers</i>
 
-**ex)**  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;```date1``` 60 bins with snow depth range 0 to 1700cm --> bin widths of ~ 28cm.  
+**ex)**
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;```date1``` 60 bins with snow depth range 0 to 1700cm --> bin widths of ~ 28cm.
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;```difference_normalized``` 200 bins with range of -1 to 20 --> bin width of ~.10 or 10% change increments.
 - ```[threshold_histogram_space]:  0.45, 1```: target cells with < ```0.45``` (45%) of cells within moving window AND >= ```1``` bin count **will be flagged**
 ```
@@ -87,7 +87,7 @@ apply_moving_window_elevation:  True
 tree_loss:                      and
 tree_gain:                      or
 ```
-Using above table and UserConfig:  
+Using above table and UserConfig:
 &nbsp;&nbsp; **ex1)** Within the 2800m elevation bin, pixels with (```difference``` > 103cm) & (```difference_normalized``` > 1.99), the ```elevation_gain``` flag will be **True**, indicating an **Outlier Flag**
 
 &nbsp;&nbsp; **ex2)** Within the 2800m elevation bin, pixels with (```difference``` < -304cm), the ```elevation_loss``` flag will be **True**, indicating an **Outlier Flag**
@@ -95,10 +95,41 @@ Using above table and UserConfig:
 ### [options]
 <i>options for extra options in RAQC</i>
 - ```[include_arrays]```:  Option to save clipped snow depth files and difference matrices to another geotiff
-- ```[include_masks]```: Option to add masks used in flag calculations to flag geotiff  
-- ```[interactive_plot]```: Will temporarilly pause during RAQC execution to display 2D histogram  
-- ```[remove_clipped_files]```: Delete clipped files ('...clipped_to...') created in clip_extent_overlap() 
+- ```[include_masks]```: Option to add masks used in flag calculations to flag geotiff
+- ```[interactive_plot]```: Will temporarilly pause during RAQC execution to display 2D histogram
+- ```[remove_clipped_files]```: Delete clipped files ('...clipped_to...') created in clip_extent_overlap()
 
+Utilities and Standalone Scripts:
+--------
+### ncrcat_CL.py
+<i>This script digs into the AWSM directory i.e ```...ops/runs``` for subdirectories i.e. ```run20190206``` to open up and concatenate or "smash" as many ```snow.nc``` files under subdirectories housed under single directory into one ```snow.nc``` file as user specifies.  This is a <b>Command Line</b> script utilizing ```argparse```.
 
+<b>ex1)</b>  Concatenate ALL ```snow.nc``` files within ```--dir-in``` into a single ```snow.nc``` file:
 
+   ```>>> python ncrcat_CL.py --dir-in '/mnt/snow/albedo/sanjoaquin/ops/wy2019/ops/runs' --base-file 'snow.nc' --file-out '~/projects/data/snow_agglom3.nc'``
 
+- For the above example:
+  - ```dir-in```: the directory with the ```run<YYYYMMDD>``` subdirectories containing ```snow.nc``` files. from AWSM runs. <i>
+  Note the subdirectories MUST be in the ```run<YYYYMMDD>``` format i.e. ```run20190401``` for script to parse properly.
+  - ```--base-file```:  .nc filename in subdirectory to grab i.e. ```snow.nc```.  Script currently hardcoded to use ```thickness``` band from ```snow.nc``` from AWSM model run.
+  Note: <i>could easily alter script to use ```em.nc``` file or other bands of ```snow.nc``` file by simply changing the ```ncrcat``` ```-v``` (variable) option in the command line call at bottom of script -  Instructions to do this are commented in script</b>
+  - ```--file-out``` The file path (including filename) to output file.
+
+<b>ex2)</b>  Specify dates to concatenate.  More specifically, specify <b>start date</b>, <b>end date</b> and <b>increment</b>.
+
+```>>>python ncrcat_CL.py --dir-in '/mnt/snow/albedo/sanjoaquin/ops/wy2019/ops/runs' --base-file 'snow.nc' --file-out '~/projects/data/snow_agglom3.nc' --start-date '20181110' --end-date '20190121' --increment 7```
+
+- For the above example:
+&emsp;<i>Note: options/flags described in previous example remain the same</i>
+
+  - ```--start-date``` and ```--end-date```: passed as a string of the format ```<YYYYMMDD>``` to bound dates to concatenate.
+  - ```--increment```: an integer which is days to between each consecutive date in concatenated files i.e. ```range(0, end_date - start_date, increment)```
+  <i>Note:</i> ```end_date - start_date``` = number of days.
+
+<b>ex3)</b> Use em.nc file
+&emsp;<i>Note</i>: in below example, you MUST change ```-v 'thickness'``` to ```v '<band name>'``` in script as described in comments for it to work.
+
+```>>>python ncrcat_CL.py --dir-in '/mnt/snow/albedo/sanjoaquin/ops/wy2019/ops/runs' --base-file 'em.nc' --file-out '~/projects/data/em_agglom3.nc' --start-date '20181110' --end-date '20190121' --increment 7```
+
+- For the above example:
+  - Same as <b>ex2)</b> except it will concatenate the ```em.nc``` bands specified by ```-v``` flag
