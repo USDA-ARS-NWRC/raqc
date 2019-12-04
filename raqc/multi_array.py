@@ -53,40 +53,45 @@ class MultiArrayOverlap(object):
                                             from model outputs
         """
 
-        # 1) ENSURE CHRONOLOGICAL ORDER
-        # Ensure that dataset 1 and dataset2 are in chronological order
-        self.date1_string = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
-        self.date2_string = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
-        check_chronology1 = pd.to_datetime(file_path_dataset1.split('/')[-1]  \
-                            .split('_')[0][-8:], format = '%Y%m%d')
-        check_chronology2 = pd.to_datetime(file_path_dataset2.split('/')[-1] \
-                            .split('_')[0][-8:], format = '%Y%m%d')
+        # 1) GET DATE STRINGS
+        # Get date strings AND if lidar flight(.tif):
+        # ensure that dataset 1 and dataset2 are in chronological order
+        if os.file.path.splitext(file_path_dataset1)[1] == '.tif':
+            self.date1_string = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
+            self.date2_string = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
+            check_chronology1 = pd.to_datetime(self.date1_string, format = '%Y%m%d')
+            check_chronology2 = pd.to_datetime(self.date2_string, format = '%Y%m%d')
 
-        if check_chronology1 < check_chronology2:
-            pass
+            if check_chronology1 < check_chronology2:
+                pass
+            else:
+                sys.exit('Date 1 must occur before Date 2. Please switch Date 1'
+                            '\n with Date 2 in UserConfig. Exiting program')
+
+        # if date1 is a snow.nc file
         else:
-            sys.exit('Date 1 must occur before Date 2. Please switch Date 1'
-                        '\n with Date 2 in UserConfig. Exiting program')
+            self.date1_string = file_path_dateset1.split('/')[-2][3:]
+            self.date2_string = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
 
         # 2) CREATE FILEPATHS
-
         # Make subdirectory --> file_out_root/basin
         # file_out_basin = os.path.join(file_out_root, basin)
-        basin_abbr = file_path_dataset1.split('/')[-1].split('_')[0][:-8]  #basin abbreviation
-        year1 = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
-        year2 = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
-        self.file_path_out_base = os.path.join(file_out_root, basin, year1 + '_' + year2)
+        # first_flight: Change basin_abbrev to file_path_dataset2
+        basin_abbr = file_path_dataset2.split('/')[-1].split('_')[0][:-8]  #basin abbreviation
+        self.file_path_out_base = os.path.join(file_out_root, basin, self.date1_string + '_' + self.date2_string)
 
         # Create directory for all output files
         if not os.path.exists(self.file_path_out_base):
             os.makedirs(self.file_path_out_base)
 
         # Make file paths
-        file_name_base = '{0}_{1}'.format(basin_abbr + year1, year2)
+        file_name_base = '{0}_{1}'.format(basin_abbr + self.date1_string, self.date2_string)
         self.file_name_base = os.path.join(self.file_path_out_base, file_name_base)
-        self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_name_base, file_name_modifier)
-        self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_name_base, file_name_modifier)
         self.file_path_out_backup_config = '{0}_{1}_raqc_backup_config.ini'.format(self.file_name_base, file_name_modifier)
+
+        # If backup_config of same name in existence, inform user that files
+        # have previously been generated under same name.
+        # Confirm that they want to overwrite these files.
         if os.path.exists(self.file_path_out_backup_config):
             print('\n{0}\nThe file: {1}'
                     '\nalready exists,indicating that raqc was previously'
@@ -109,6 +114,9 @@ class MultiArrayOverlap(object):
                     '\nor      "exit"      to exit and fix user config')
                     pass
 
+        # ...continue making file paths
+        self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_name_base, file_name_modifier)
+        self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_name_base, file_name_modifier)
         self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_name_base)
         self.elevation_band_resolution = elevation_band_resolution
         self.file_path_out_json = '{0}_metadata.txt'.format(self.file_name_base)
@@ -136,8 +144,6 @@ class MultiArrayOverlap(object):
         coloredlogs.install(logger=self.log, level=self.log_level,
                                             fmt=fmt)
 
-        # print_config_report(warnings, errors, logger=self.log)
-
         # 4) CLIPPED FILES in CONFIG? check if clipped files passed to config
         # Note: NOT ROBUST for user input error!
         # i.e. if wrong basin ([file][basin]) in UserConfig, problems may emerge
@@ -158,6 +164,7 @@ class MultiArrayOverlap(object):
                 '\n please ensure that both are either clipped or the original \n')
             sys.exit('program will exit for user to fix problem ---')
 
+        # ...continue making file paths
         # creates file paths for clipped snow date and topo.nc-derived files
         self.file_path_date1_te, self.file_path_date2_te = \
             create_clipped_file_names(self.file_path_out_base,
@@ -167,6 +174,7 @@ class MultiArrayOverlap(object):
         self.file_path_dem_te = self.file_name_base + '_dem_common_extent.tif'
         self.file_path_veg_te = self.file_name_base + '_veg_height_common_extent.tif'
 
+        # check if clipped veg and dem files exist in base folder
         if self.already_clipped:
             if not (os.path.isfile(self.file_path_dem_te) & \
                     os.path.isfile(self.file_path_veg_te)):
@@ -193,6 +201,8 @@ class MultiArrayOverlap(object):
                 \nRun will proceed, and original snow depth and topo files \
                 \nwill be clipped (original files will be retained)\n'. \
                 format(self.file_name_base)
+        # User did not passed clipped files, but below code block automatically
+        # detects the existence of clipped files based on file name
         if not self.already_clipped:
             # check for existence of clipped snow files
             if os.path.isfile(self.file_path_date1_te) & os.path.isfile \
@@ -215,10 +225,12 @@ class MultiArrayOverlap(object):
                     self.file_path_dataset1 = file_path_dataset1
                     self.file_path_dataset2 = file_path_dataset2
                     self.file_path_topo = file_path_topo
+
         # 6) LOSS or GAIN
         # determine if basin lost or gained snow and how much
+        # Loss or Gain determines which flags will be included in flag array
         file_path_snownc1, file_path_snownc2 = return_snow_files( \
-                                file_path_snownc, year1, year2)
+                                file_path_snownc, self.date1_string, self.date2_string)
 
         self.basin_gain, basin_total_change, basin_avg_change = \
                 determine_basin_change(file_path_snownc1, file_path_snownc2,
@@ -253,13 +265,10 @@ class MultiArrayOverlap(object):
             remove_clipped_files:   UserConfig option to delete clipped file
         """
 
-        topo_rez_same, extents_same, min_extents, rez13 = prep_coords( \
-                self.file_path_dataset1, self.file_path_dataset2, \
-                self.file_path_topo, 'dem')
-
-        # Save JSON
-        # save metadata of original date2 to json txt file
-        # date1 or date2 should both work?  Vestige from when date mattered..
+        # 1) A few tasks
+        # a. Save original metadata to json formated txt file
+        #     date1 or date2 should both work?  Vestige from when date mattered..
+        # b. get information on extents and resolution
         with rio.open(self.file_path_dataset2) as src:
             meta2 = src.profile
 
@@ -272,18 +281,28 @@ class MultiArrayOverlap(object):
             json_dict.update({'crs' : crs_object})
             json.dump(json_dict, outfile)
 
+        # topo_rez_same: topo spatial resolution same as snow files,
+        # extents_same:   if snow files have matching spatial resolutions,
+        # min_extents: minimum overlapping extents
+        # rez13: resolution of all three
+        topo_rez_same, extents_same, min_extents, rez13 = prep_coords( \
+                self.file_path_dataset1, self.file_path_dataset2, \
+                self.file_path_topo, 'dem')
+
+        # 2) Create strings to prepare files using OS.run
+
+        # create file paths of clipped files
         file_path_dem_te = self.file_name_base + '_dem_common_extent.tif'
         file_path_veg_te = self.file_name_base + '_veg_height_common_extent.tif'
         file_path_dem = self.file_name_base + '_dem.tif'
         file_path_veg = self.file_name_base + '_veg.tif'
 
         # list of clipped files that are created in below code
-        # files deleted upon UserConfig preference
+        # to be deleted upon UserConfig preference
         self.remove_clipped_files = remove_clipped_files
         self.new_file_list = [self.file_path_date1_te, self.file_path_date2_te, \
                                 file_path_dem_te, file_path_veg_te]
 
-        # Create strings to run as os.run commands
         # prepare log messages
         log_msg1 = '\nThe resolution of your topo.nc file differs from repeat arrays' \
             '\nIt will be resized to fit the resolution repeat arrays.' \
@@ -346,6 +365,7 @@ class MultiArrayOverlap(object):
             run_arg4 = 'cp {} {} {}'.format(file_path_dem, self.file_path_dem_te, '-overwrite')
             run_arg4b = 'cp {} {} {}'.format(file_path_veg, self.file_path_veg_te, '-overwrite')
 
+        # 3) Now run all commands in proper order
         run(run_arg1, shell=True)
         run(run_arg1b, shell=True)
         run(run_arg2, shell = True)
@@ -506,24 +526,31 @@ class MultiArrayOverlap(object):
     # @profile
     def get_buffer(self):
         """
-        Returns numbers of cells to buffer tiff to match original size, extents, etc.
+        Returns numbers of cells to buffer clipped tiff to match size and
+        extents of original file.
 
         Outputs:
             buffer:     dictionary with buffer values left, right, bottom, top
+                        in index positions not UTMs
         """
 
 
         # get extents and resolution from json and determine if originally clipped
+        # Zach consider using spatialnc.get_topo for saving this data instead
         d_orig = self.derive_dataset('d2_te')
+        #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
+        #   Note: self.extents_same comes from derive_dataset
         if not self.extents_same:
-            #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
-
+            # clipped bounds
             bounds_date2_te = [None] * 4
             bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, self.d2_te.bounds.bottom
             bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.right, self.d2_te.bounds.top
 
             rez = d_orig['resolution']
             bounds_date2 = [None] * 4
+            # Round bounds (extents) to even numbers in multiples of rounded rez
+            #   For instance, bounds 2049m and 2024m with rez = 50m
+            #   convert to 2050m and 2000m respectively
             bounds_date2[0] = evenly_divisible_extents(d_orig['left'], rez)
             bounds_date2[2] = evenly_divisible_extents(d_orig['right'], rez)
             bounds_date2[1] = evenly_divisible_extents(d_orig['bottom'], rez)
@@ -536,6 +563,8 @@ class MultiArrayOverlap(object):
             buffer.update({'bottom' : round((bounds_date2[1] - bounds_date2_te[1]) / rez)})
             buffer.update({'right' : round((bounds_date2[2] - bounds_date2_te[2]) / rez) * -1})
             buffer.update({'top' : round((bounds_date2[3] - bounds_date2_te[3]) / rez)})
+
+            # Replace zeros with None if they exist
             for k, v in buffer.items():
                 if v == 0:
                     buffer[k] = None
@@ -580,16 +609,16 @@ class MultiArrayOverlap(object):
         self.mask_overlap_nan = ~self.mask_overlap_nan
 
         # 2) PREPARE flags for saving
-        # affix 'flag_' to each name because that's how they've been saved
+
+        # if basin loses or gains overall, remove applicable flags from analysis
+        # as they will be noisy
         if self.basin_gain:
             flag_name.remove('basin_gain')
         else:
             flag_name.remove('basin_loss')
 
+        # affix 'flag_' to each name because that's how they've been saved
         flag_names = ['flag_' + flag_name for flag_name in flags]
-
-        # if basin loses or gains overall, remove applicable flags from analysis
-        # as they will be noisy
 
         # append masks to flags list to save to tiff
         if include_masks != None:
@@ -603,9 +632,11 @@ class MultiArrayOverlap(object):
         band_names = apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
 
         # 3) RESTORE clipped arrays/flags to original size, extent etc:
-        # First determine number of rows and columns to buffer with NaNs
+
+        # First determine if buffering necessary
         self.get_buffer()
         if not self.extents_same:
+            # find number of rows and columns to buffer with NaNs
             buffer = self.buffer
             # buffer flag arrays with nans to fit original date2 array shape
             # nan = <uint> 255
@@ -615,8 +646,10 @@ class MultiArrayOverlap(object):
                 flag_buffer[buffer['top'] : buffer['bottom'], buffer['left'] : buffer['right']] = mat_temp
                 setattr(self, band, flag_buffer)
 
-            # grab json with original metadata and format some key value pairs
+            # Open JSON with original metadata and restore some key value pairs
+            # that required changes when saving to json txt file
             meta_orig = update_meta_from_json(self.file_path_out_json)
+
             # update clipped metadata with that of original - extents, resolutition, etc.
             self.meta2_te.update(meta_orig)
 
@@ -646,8 +679,12 @@ class MultiArrayOverlap(object):
             for array in include_arrays:
                 array_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
 
-            if not self.extents_same:
+            # First determine if buffering necessary
+            if not self.extents_same
+                # find number of rows and columns to buffer with NaNs
                 buffer = self.buffer
+                # buffer arrays with nans to fit original date2 array shape
+                # nan = <uint> 255
                 for id, band in enumerate(array_names):
                     array_buffer = np.full(self.orig_shape, -9999, dtype = 'float32')
                     mat_temp = getattr(self, band)
@@ -664,7 +701,7 @@ class MultiArrayOverlap(object):
                 'dtype': 'float32',
                 'nodata': -9999})
 
-            # 4) Write Flags.tif
+            # 4) Write Arrays.tif
             with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
                 for id, band in enumerate(array_names, start = 1):
                     # try:
@@ -756,10 +793,14 @@ class MultiArrayOverlap(object):
         """
         Unpacks, formats original metadata from json file and returns
         Also determines self.extents_same
+        Zach consider outputting orig_extents_rez
 
-        Outputs:
+        Inputs:
+            dataset_clipped_name:   rio object name
+        Outputs (i.e. self.):
             orig_shape:         dimensions of original date2 input tif
             extents_same:       boolean - was original file clipped
+        Returns:
             orig_extents_rez:   extents and resolution of orig date2 input tif
         """
 
@@ -775,6 +816,7 @@ class MultiArrayOverlap(object):
         bottom = top - meta_orig['height'] * rez
 
         # load clipped dataset
+        # Zach  do we really need to save self.d2_te or can we just save a text file?
         meta_clip = getattr(self, dataset_clipped_name)
 
         # determine if original extents were same
@@ -782,10 +824,13 @@ class MultiArrayOverlap(object):
                             (meta_clip.bounds.right == right) & \
                             (meta_clip.bounds.top == top) & \
                             (meta_clip.bounds.bottom == bottom)
+
+        # dictionary of extents of original file
         orig_extents_rez.update({'left' : left, 'right' : right, 'top' : top, \
                         'bottom' : bottom, 'resolution' : rez})
 
         # save size of original array as tuple to get shape
+        # Zach consider adding orig shape to json or as a spatialnc.get_topo_stats
         orig_shape = []
         orig_shape.extend([round((top - bottom)/rez), round((right - left)/rez)])
         self.orig_shape = tuple(orig_shape)

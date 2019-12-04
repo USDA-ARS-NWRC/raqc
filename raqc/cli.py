@@ -28,6 +28,23 @@ def main():
     #checking_later allows not to crash with errors.
     cfg = copy.deepcopy(ucfg.cfg)
 
+    # 1) ENSURE CHRONOLOGICAL ORDER
+    # Ensure that dataset 1 and dataset2 are in chronological order
+    file_path_dataset1 = multi_array.Flags(cfg['paths']['file_path_in_date1']
+    file_path_dataset2 = multi_array.Flags(cfg['paths']['file_path_in_date2']
+    self.date1_string = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
+    self.date2_string = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
+    check_chronology1 = pd.to_datetime(file_path_dataset1.split('/')[-1]  \
+                        .split('_')[0][-8:], format = '%Y%m%d')
+    check_chronology2 = pd.to_datetime(file_path_dataset2.split('/')[-1] \
+                        .split('_')[0][-8:], format = '%Y%m%d')
+
+    if check_chronology1 < check_chronology2:
+        pass
+    else:
+        sys.exit('Date 1 must occur before Date 2. Please switch Date 1'
+                    '\n with Date 2 in UserConfig. Exiting program')
+
     raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'],
                 cfg['paths']['file_path_in_date2'], cfg['paths']['file_path_topo'],
                 cfg['paths']['file_path_out'], cfg['paths']['basin'],

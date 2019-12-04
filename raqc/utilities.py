@@ -415,14 +415,22 @@ def snowline(dem, basin_mask, elevation_band_resolution, depth1, depth2, \
 def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
                             file_path_base, band):
     """
-    First pass (nod to Mark for the term) at determining if basin lost or
-    gained snow.
+    First pass (nod to Mark for the term "First Pass" for example "I have a P I,
+    here is my first pass at retaining my dignity - I'll shoot 17 consecutive
+    shots 2.5 ft from basket until I win") at determining if basin lost or
+    gained snow.  This short protocol takes two snow.nc files
     Args:
         snownc1:    array from model run of date 1
         snownc2:    array from model run one day prior to date 2.  This assures
                     the lidar update is not included
+        file_path_topo:     grab mask layer from this file
+        file_path_base:     just for object naming purposes
+        band:               Could theoretically select a band other than 'thickness'
     Returns:
-        gain:       True if basin gained snow.  False if basin lost snow.
+        basin_gain:       True if basin gained snow.  False if basin lost snow.
+                        this will be used later to
+        basin_total_change:
+        basin_gain, basin_total_change, basin_avg_change
     """
     import sys
 
@@ -433,7 +441,7 @@ def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
     date1 = file_path_snownc1.split('/')[-1][3:11]
     date2 = file_path_snownc2.split('/')[-1][3:11]
     file_path_out = os.path.join(file_path_base, \
-                'RAQC_modelled_basin_diff_{}_to_{}.png'.format(date1, date1))
+                'RAQC_modelled_basin_diff_{}_to_{}.png'.format(date1, date2))
 
     with rio.open(snownc1_file_open_rio) as src:
         snownc1_obj = src
@@ -454,47 +462,25 @@ def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
     mask = np.ndarray.astype(mask, np.bool)
     both_zeros = (np.absolute(snownc1) ==0) & (np.absolute(snownc2) == 0)
     zeros_and_mask = mask & ~both_zeros
-    temp = snownc2 - snownc1
-    snow_cells = temp[zeros_and_mask]
+    diff = snownc2 - snownc1
+    diff_clipped_to_mask = diff[zeros_and_mask]
 
-    basin_total_change = np.sum(snow_cells)
-    basin_area = snow_cells.shape[0]
+    basin_total_change = np.sum(diff_clipped_to_mask)
+    basin_area = diff_clipped_to_mask.shape[0]
     basin_avg_change = round(basin_total_change / basin_area, 2)
-
-    # if clipping map too much, change these perecentiles
-    # for instance from 1 to 0.1 and 99 to 99.9
-    minC = np.nanpercentile(snow_cells, 1)
-    maxC = np.nanpercentile(snow_cells, 99)
-
-    # Now plot change
-    # nans where array mask
-    diff_map = np.full(temp.shape, np.nan)
-    diff_map[mask] = temp[mask]
-    # limits used in colorbar
-    cb_range_lims = [minC, maxC]
 
     if basin_total_change > 0:
         basin_gain = True
     else:
         basin_gain = False
 
-    pltz_obj = pltz.Plotables()
-    pltz_obj.marks_colors()
-    pltz_obj.cb_readable(cb_range_lims, 'L', 5)
+    cbar_string = '\u0394 thickness (m)'
+    suptitle_string = '\u0394 snow thickness (m): snow.nc run{}_to_{}'.
+                        format(date1, date2)
 
-    fig, axes = plt.subplots(nrows = 1, ncols = 1)
-    h = axes.imshow(diff_map, cmap = pltz_obj.cmap_marks, norm=MidpointNormalize(midpoint = 0))
-    axes.axis('off')
-    cbar = fig.colorbar(h, ax=axes, fraction = 0.04, pad = 0.04, \
-            orientation = 'vertical', extend = 'both', ticks = pltz_obj.cb_range)
-    cbar.set_label('\u0394 thickness (m)', rotation=270, labelpad=14)
-    cbar.ax.tick_params(labelsize = 8)
-    h.set_clim(minC, maxC)
-    fig.suptitle('\u0394 snow thickness (m): snow.nc run{}_to_{}'.format(date1, date2))
-    plt.savefig(file_path_out, dpi = 180)
+    basic_plot(diff, zeros_and_mask, cbar_string, suptitle_string, file_path_out)
+
     return basin_gain, basin_total_change, basin_avg_change
-    # axes.set_xlabel('early date depth (m)')
-    # axes.set_ylabel('relative delta snow depth')
 
 def return_snow_files(file_path_snownc, year1, year2):
     # Snow.nc file paths
@@ -516,3 +502,42 @@ def return_snow_files(file_path_snownc, year1, year2):
     file_path_snownc1, file_path_snownc2 = temp_snow1, temp_snow2
 
     return file_path_snownc1, file_path_snownc2
+
+def basic_plot(array, mask, cbar_string, suptitle_string, file_path_out):
+    '''
+    Attempt to generalize a plot function for abstraction.
+    Args:
+        array:      original array to plot
+        mask:       mask if only considering masked area of array. For example,
+                    if nans or value clipping
+
+    '''
+
+    # if clipping map too much, change these perecentiles
+    # for instance from 1 to 0.1 and 99 to 99.9
+    array_clipped_to_mask = array[mask]
+
+    minC = np.nanpercentile(array_clipped_to_mask, 1)
+    maxC = np.nanpercentile(array_clipped_to_mask, 99)
+
+    # Now plot change
+    # nans where array mask
+    diff_map = np.full(array.shape, np.nan)
+    diff_map[mask] = array_clipped_to_mask
+    # limits used in colorbar
+    cb_range_lims = [minC, maxC]
+
+    pltz_obj = pltz.Plotables()
+    pltz_obj.marks_colors()
+    pltz_obj.cb_readable(cb_range_lims, 'L', 5)
+
+    fig, axes = plt.subplots(nrows = 1, ncols = 1)
+    h = axes.imshow(diff_map, cmap = pltz_obj.cmap_marks, norm=MidpointNormalize(midpoint = 0))
+    axes.axis('off')
+    cbar = fig.colorbar(h, ax=axes, fraction = 0.04, pad = 0.04, \
+            orientation = 'vertical', extend = 'both', ticks = pltz_obj.cb_range)
+    cbar.set_label(cbar_string, rotation=270, labelpad=14)
+    cbar.ax.tick_params(labelsize = 8)
+    h.set_clim(minC, maxC)
+    fig.suptitle(suptitle_string)
+    plt.savefig(file_path_out, dpi = 180)
