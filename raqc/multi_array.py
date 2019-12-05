@@ -18,7 +18,8 @@ from memory_profiler import profile
 from .utilities import prep_coords, get_elevation_bins, check_DEM_resolution, \
                         evenly_divisible_extents, get16bit, update_meta_from_json, \
                         apply_dict, create_clipped_file_names, format_date, \
-                        determine_basin_change, snowline, return_snow_files
+                        determine_basin_change, snowline, return_snow_files, \
+                        debug_fctn
 from tabulate import tabulate
 import pandas as pd
 import datetime
@@ -56,7 +57,7 @@ class MultiArrayOverlap(object):
         # 1) GET DATE STRINGS
         # Get date strings AND if lidar flight(.tif):
         # ensure that dataset 1 and dataset2 are in chronological order
-        if os.file.path.splitext(file_path_dataset1)[1] == '.tif':
+        if os.path.splitext(file_path_dataset1)[1] == '.tif':
             self.date1_string = file_path_dataset1.split('/')[-1].split('_')[0][-8:]
             self.date2_string = file_path_dataset2.split('/')[-1].split('_')[0][-8:]
             check_chronology1 = pd.to_datetime(self.date1_string, format = '%Y%m%d')
@@ -225,6 +226,10 @@ class MultiArrayOverlap(object):
                     self.file_path_dataset1 = file_path_dataset1
                     self.file_path_dataset2 = file_path_dataset2
                     self.file_path_topo = file_path_topo
+            else:
+                self.file_path_dataset1 = file_path_dataset1
+                self.file_path_dataset2 = file_path_dataset2
+                self.file_path_topo = file_path_topo
 
         # 6) LOSS or GAIN
         # determine if basin lost or gained snow and how much
@@ -232,29 +237,30 @@ class MultiArrayOverlap(object):
         file_path_snownc1, file_path_snownc2 = return_snow_files( \
                                 file_path_snownc, self.date1_string, self.date2_string)
 
-        self.basin_gain, basin_total_change, basin_avg_change = \
-                determine_basin_change(file_path_snownc1, file_path_snownc2,
-                                    file_path_topo, self.file_path_out_base,
-                                    'thickness')
-
+        # self.basin_gain, basin_total_change, basin_avg_change = \
+        #         determine_basin_change(file_path_snownc1, file_path_snownc2,
+        #                             file_path_topo, self.file_path_out_base,
+                                    # 'thickness')
+        self.basin_gain = False
+        debug_fctn()
         # temp dates to pass into log message
         temp_date1 = file_path_snownc1.split('/')[-1]
         temp_date2 = file_path_snownc2.split('/')[-1]
         # turn True or False into string = 'gaining' or 'losing' for log message
-        gain_loss = 'gaining' * self.basin_gain + 'losing' * (not self.basin_gain)
-        log_message = '\nTotal basin_difference in depth ("thickness")'\
-                        '\ncalculated between {0} and {1} is {2}m.' \
-                        '\nThe average change in areas where depth changed, ' \
-                        '\ni.e. where snow was present in either of the two dates,' \
-                        '\nwas {3} m.' \
-                        '\nAs such the basin is considered to be "{4}.' \
-                        '\nFlags will be determined accordingly\n'.format \
-                        (temp_date1, temp_date2, str(int(round(basin_total_change, 0))), \
-                        str(round(basin_avg_change,2)), gain_loss)
-        self.log.info(log_message)
+        # gain_loss = 'gaining' * self.basin_gain + 'losing' * (not self.basin_gain)
+        # log_message = '\nTotal basin_difference in depth ("thickness")'\
+        #                 '\ncalculated between {0} and {1} is {2}m.' \
+        #                 '\nThe average change in areas where depth changed, ' \
+        #                 '\ni.e. where snow was present in either of the two dates,' \
+        #                 '\nwas {3} m.' \
+        #                 '\nAs such the basin is considered to be "{4}.' \
+        #                 '\nFlags will be determined accordingly\n'.format \
+        #                 (temp_date1, temp_date2, str(int(round(basin_total_change, 0))), \
+        #                 str(round(basin_avg_change,2)), gain_loss)
+        # self.log.info(log_message)
 
 
-    # @profile
+    @profile
     def clip_extent_overlap(self, remove_clipped_files):
         """
         finds overlapping extent of the input files (Geotiffs).  Adds clipped
@@ -274,9 +280,11 @@ class MultiArrayOverlap(object):
 
         with open(self.file_path_out_json, 'w') as outfile:
             json_dict = dict({k:v for k, v in meta2.items() if k != 'crs'})
-            # convert crs to integer.
-            # crs object is not "serializable" for saving with json.dump
-            # will be reincarnated as object using epsg code later
+            # meta2 is a dictionary with metadata, however the 'crs' key
+            # yields an object: CRS.from_epsg(<epsg#>).  Below function
+            # rio.crs.CRS.to_epsg converts crs object to epsg int i.e.= 32611
+            # Required because crs object is not "serializable" for json.dump.
+            # obj will be reincarnated with epsg code later to save with Rasterio
             crs_object = rio.crs.CRS.to_epsg(meta2['crs'])
             json_dict.update({'crs' : crs_object})
             json.dump(json_dict, outfile)
@@ -308,7 +316,7 @@ class MultiArrayOverlap(object):
             '\nIt will be resized to fit the resolution repeat arrays.' \
             '\nTopo spatial resolution = {0}    &   repeat arrays resolution = {1}' \
             '\n Your input files will NOT be changed{2}\n' \
-                                                .format(rez13[2], rez[0], '--'*60)
+                                                .format(rez13[2], rez13[0], '--'*60)
         log_msg2 = '\nNote: the extents of date1 and date2 were the same and' \
                     '\nDid NOT need clipping.  File copied and renamed as clipped' \
                     '\nbut is the same\n'
@@ -327,11 +335,11 @@ class MultiArrayOverlap(object):
             self.log.info(log_msg1)
 
             run_arg1 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}' \
-                        .format(round(rez[0]), self.file_path_topo, \
+                        .format(round(rez13[0]), self.file_path_topo, \
                         file_path_dem)
 
             run_arg1b ='gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":veg_height {2}' \
-                        .format(round(rez[0]), self.file_path_topo, \
+                        .format(round(rez13[0]), self.file_path_topo, \
                         file_path_veg)
 
         # START Clipping
@@ -383,7 +391,7 @@ class MultiArrayOverlap(object):
         self.file_path_date2_clipped = self.file_path_date2_te
         self.file_name_dem_clipped = self.file_path_dem_te
 
-    # @profile
+    @profile
     def mask_basic(self):
         """
         Creates boolean masks and flags needed for multiple methods within RAQC, like
@@ -474,7 +482,7 @@ class MultiArrayOverlap(object):
 
         self.log.debug('Exited mask_advanced')
 
-    # @profile
+    @profile
     def make_diff_mat(self):
         """
         Saves as attribute a normalized difference matrix of the two input tiffs.
@@ -523,7 +531,7 @@ class MultiArrayOverlap(object):
         self.mat_diff_norm = np.ndarray.astype(mat_diff_norm, np.float16)
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
 
-    # @profile
+    @profile
     def get_buffer(self):
         """
         Returns numbers of cells to buffer clipped tiff to match size and
@@ -537,7 +545,7 @@ class MultiArrayOverlap(object):
 
         # get extents and resolution from json and determine if originally clipped
         # Zach consider using spatialnc.get_topo for saving this data instead
-        d_orig = self.derive_dataset('d2_te')
+        self.derive_dataset('d2_te')
         #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
         #   Note: self.extents_same comes from derive_dataset
         if not self.extents_same:
@@ -546,15 +554,19 @@ class MultiArrayOverlap(object):
             bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, self.d2_te.bounds.bottom
             bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.right, self.d2_te.bounds.top
 
-            rez = d_orig['resolution']
+            rez = self.orig_extents_rez['resolution']
             bounds_date2 = [None] * 4
             # Round bounds (extents) to even numbers in multiples of rounded rez
             #   For instance, bounds 2049m and 2024m with rez = 50m
             #   convert to 2050m and 2000m respectively
-            bounds_date2[0] = evenly_divisible_extents(d_orig['left'], rez)
-            bounds_date2[2] = evenly_divisible_extents(d_orig['right'], rez)
-            bounds_date2[1] = evenly_divisible_extents(d_orig['bottom'], rez)
-            bounds_date2[3] = evenly_divisible_extents(d_orig['top'], rez)
+            bounds_date2[0] = evenly_divisible_extents \
+                                        (self.orig_extents_rez['left'], rez)
+            bounds_date2[2] = evenly_divisible_extents \
+                                        (self.orig_extents_rez['right'], rez)
+            bounds_date2[1] = evenly_divisible_extents \
+                                        (self.orig_extents_rez['bottom'], rez)
+            bounds_date2[3] = evenly_divisible_extents \
+                                        (self.orig_extents_rez['top'], rez)
 
             buffer={}
             # Notice '*-1'.  Those ensure subsetting flag array into nan array
@@ -613,9 +625,9 @@ class MultiArrayOverlap(object):
         # if basin loses or gains overall, remove applicable flags from analysis
         # as they will be noisy
         if self.basin_gain:
-            flag_name.remove('basin_gain')
+            flags.remove('basin_gain')
         else:
-            flag_name.remove('basin_loss')
+            flags.remove('basin_loss')
 
         # affix 'flag_' to each name because that's how they've been saved
         flag_names = ['flag_' + flag_name for flag_name in flags]
@@ -633,6 +645,19 @@ class MultiArrayOverlap(object):
 
         # 3) RESTORE clipped arrays/flags to original size, extent etc:
 
+        # if input tif files were less than desired 50m output
+        meta2_clip = getattr(self, 'meta2_te')
+        rez_clip = meta2_clip['transform'][0]
+        if round(rez_clip) != 50:
+            self.log.debug('rez not 50m')
+            flag_dtype = 'float32'
+            fill_val = np.nan
+            not_50m = True
+        else:
+            flag_dtype = 'uint8'
+            fill_val = 255
+            not_50m = False
+
         # First determine if buffering necessary
         self.get_buffer()
         if not self.extents_same:
@@ -641,8 +666,10 @@ class MultiArrayOverlap(object):
             # buffer flag arrays with nans to fit original date2 array shape
             # nan = <uint> 255
             for id, band in enumerate(flag_names):
-                flag_buffer = np.full(self.orig_shape, 255, dtype = 'uint8')
+                flag_buffer = np.full(self.orig_shape, fill_val, dtype = flag_dtype)
                 mat_temp = getattr(self, band)
+                if not_50m:
+                    mat_temp = mat_temp.astype(flag_dtype)
                 flag_buffer[buffer['top'] : buffer['bottom'], buffer['left'] : buffer['right']] = mat_temp
                 setattr(self, band, flag_buffer)
 
@@ -656,19 +683,29 @@ class MultiArrayOverlap(object):
         # upate metadata to include number of bands (flags) and uint8 dtype
         self.meta2_te.update({
             'count': len(flag_names),
-            'dtype': 'uint8',
-            'nodata': 255})
+            'dtype': flag_dtype,
+            'nodata': fill_val})
 
         # 4) WRITE Flags.tif
         with rio.open(self.file_path_out_tif_flags, 'w', **self.meta2_te) as dst:
             for id, band in enumerate(flag_names, start = 1):
                 try:
-                    dst.write_band(id, getattr(self, flag_names[id - 1]))
+                    mat_temp = getattr(self, flag_names[id - 1])
+                    dst.write_band(id, mat_temp.astype(flag_dtype))
                     dst.set_band_description(id, band_names[id - 1])
                 except ValueError:  # Rasterio has no float16  >> cast to float32
+                    self.log.debug('Try except in save_tiff: if triggered, investigate')
                     mat_temp = getattr(self, flag_names[id - 1])
-                    dst.write_band(id, mat_temp.astype('uint8'))
+                    dst.write_band(id, mat_temp.astype(flag_dtype))
                     dst.set_band_description(id, band_names[id - 1])
+
+        # 4a) if images need rescaling to 50m
+        if not_50m:
+            fp_temp_base = os.path.splitext(self.file_path_out_tif_flags)[-2]
+            fp_temp = '{}_temp.tif'.format(fp_temp_base)
+            cmd = 'gdalwarp -r average -overwrite -tr 50 50 {0} {1}' \
+                    .format(self.file_path_out_tif_flags, fp_temp)
+            run(cmd, shell = True)
 
         # REPEAT steps 3) and 4) for saving arrays i.e. diff and diff_norm
 
@@ -680,7 +717,7 @@ class MultiArrayOverlap(object):
                 array_names.append(self.keys_master['config_to_mat_object'][array])  # 1)Change here and @2 if desire to save single band
 
             # First determine if buffering necessary
-            if not self.extents_same
+            if not self.extents_same:
                 # find number of rows and columns to buffer with NaNs
                 buffer = self.buffer
                 # buffer arrays with nans to fit original date2 array shape
@@ -834,12 +871,12 @@ class MultiArrayOverlap(object):
         orig_shape = []
         orig_shape.extend([round((top - bottom)/rez), round((right - left)/rez)])
         self.orig_shape = tuple(orig_shape)
-        return(orig_extents_rez)
+        self.orig_extents_rez = orig_extents_rez
 
 class PatternFilters():
     def init(self):
         pass
-    # @profile
+    @profile
     def mov_wind(self, name, size):
         """
          Moving window operation which adjusts window sizes to fit along
@@ -907,7 +944,7 @@ class PatternFilters():
         self.log.debug(log_message)
         return(pct)
 
-    # @profile
+    @profile
     def mov_wind2(self, name, size):
         """
         Orders and orders of magnitude faster moving window function than mov_wind().
@@ -951,7 +988,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                 file_path_topo, file_out_root, basin,
                                 file_name_modifier, file_path_snownc)
 
-    # @profile
+    @profile
     def make_histogram(self, name, nbins, thresh, moving_window_size):
         """
         Creates 2D histogram and finds outliers.  Outlier detection is pretty crude
@@ -1072,7 +1109,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                             self.elevation_band_resolution)
         self.log.info(log_msg1)
 
-    # @profile
+    @profile
     def flag_elevation_blocks(self, apply_moving_window, moving_window_size,
             neighbor_threshold, snowline_threshold, outlier_percentiles):
         """

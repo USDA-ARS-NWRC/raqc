@@ -12,6 +12,7 @@ import datetime
 import matplotlib.pyplot as plt
 from . import plotables as pltz
 from snowav.utils.MidpointNormalize import MidpointNormalize
+from memory_profiler import profile
 
 def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
     """
@@ -412,6 +413,7 @@ def snowline(dem, basin_mask, elevation_band_resolution, depth1, depth2, \
 
     return snowline_elev
 
+@profile
 def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
                             file_path_base, band):
     """
@@ -475,10 +477,10 @@ def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
         basin_gain = False
 
     cbar_string = '\u0394 thickness (m)'
-    suptitle_string = '\u0394 snow thickness (m): snow.nc run{}_to_{}'.
+    suptitle_string = '\u0394 snow thickness (m): snow.nc run{}_to_{}'. \
                         format(date1, date2)
 
-    basic_plot(diff, zeros_and_mask, cbar_string, suptitle_string, file_path_out)
+    # basic_plot(diff, zeros_and_mask, cbar_string, suptitle_string, file_path_out)
 
     return basin_gain, basin_total_change, basin_avg_change
 
@@ -541,3 +543,7 @@ def basic_plot(array, mask, cbar_string, suptitle_string, file_path_out):
     h.set_clim(minC, maxC)
     fig.suptitle(suptitle_string)
     plt.savefig(file_path_out, dpi = 180)
+
+@profile
+def debug_fctn():
+    print('lets just see what the memory is')
