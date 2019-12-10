@@ -29,8 +29,9 @@ import coloredlogs
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-                file_out_root, basin, file_name_modifier,
-                elevation_band_resolution, file_path_snownc):
+                file_out_root, file_path_snownc, basin, file_name_modifier,
+                elevation_band_resolution):
+    # def __init__(self):
         """
         Initiate self and add attributes needed throughout RAQC run.
         Ensure dates are in chronological order.
@@ -53,7 +54,6 @@ class MultiArrayOverlap(object):
             file_path_snow_nc:              file path containing snow.nc files
                                             from model outputs
         """
-
         # 1) GET DATE STRINGS
         # Get date strings AND if lidar flight(.tif):
         # ensure that dataset 1 and dataset2 are in chronological order
@@ -116,6 +116,7 @@ class MultiArrayOverlap(object):
                     pass
 
         # ...continue making file paths
+        self.file_path_snownc = file_path_snownc
         self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_name_base, file_name_modifier)
         self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_name_base, file_name_modifier)
         self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_name_base)
@@ -231,33 +232,9 @@ class MultiArrayOverlap(object):
                 self.file_path_dataset2 = file_path_dataset2
                 self.file_path_topo = file_path_topo
 
-        # 6) LOSS or GAIN
-        # determine if basin lost or gained snow and how much
-        # Loss or Gain determines which flags will be included in flag array
-        file_path_snownc1, file_path_snownc2 = return_snow_files( \
-                                file_path_snownc, self.date1_string, self.date2_string)
 
-        # self.basin_gain, basin_total_change, basin_avg_change = \
-        #         determine_basin_change(file_path_snownc1, file_path_snownc2,
-        #                             file_path_topo, self.file_path_out_base,
-                                    # 'thickness')
-        self.basin_gain = False
-        debug_fctn()
-        # temp dates to pass into log message
-        temp_date1 = file_path_snownc1.split('/')[-1]
-        temp_date2 = file_path_snownc2.split('/')[-1]
-        # turn True or False into string = 'gaining' or 'losing' for log message
-        # gain_loss = 'gaining' * self.basin_gain + 'losing' * (not self.basin_gain)
-        # log_message = '\nTotal basin_difference in depth ("thickness")'\
-        #                 '\ncalculated between {0} and {1} is {2}m.' \
-        #                 '\nThe average change in areas where depth changed, ' \
-        #                 '\ni.e. where snow was present in either of the two dates,' \
-        #                 '\nwas {3} m.' \
-        #                 '\nAs such the basin is considered to be "{4}.' \
-        #                 '\nFlags will be determined accordingly\n'.format \
-        #                 (temp_date1, temp_date2, str(int(round(basin_total_change, 0))), \
-        #                 str(round(basin_avg_change,2)), gain_loss)
-        # self.log.info(log_message)
+
+    debug_fctn()
 
 
     @profile
@@ -444,6 +421,7 @@ class MultiArrayOverlap(object):
 
         snow_present_mask = ~(date1_zero & date2_zero)  #snow present on at least one date
         self.mask_nan_snow_present = snow_present_mask & self.mask_overlap_nan  # combine nan-free mask with snow present mask
+        print(snow_present_mask.shape, self.mask_overlap_nan.shape)
 
         self.all_gain = date1_zero & (np.absolute(self.mat_clip2) > 0)
 
@@ -531,7 +509,6 @@ class MultiArrayOverlap(object):
         self.mat_diff_norm = np.ndarray.astype(mat_diff_norm, np.float16)
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
 
-    @profile
     def get_buffer(self):
         """
         Returns numbers of cells to buffer clipped tiff to match size and
@@ -581,14 +558,13 @@ class MultiArrayOverlap(object):
                 if v == 0:
                     buffer[k] = None
             self.buffer = buffer
-    def save_tiff(self, fname, flags, include_arrays, include_masks):
+    def save_tiff(self, flag_attribute_names, include_arrays, include_masks):
         """
         Saves up to two geotiffs using RasterIO basically.  One tiff will be the
         matrices of floats, and the second the masks and flags - booleans (uint8).
         Bands to output will be specified in UserConfig
 
         Args:
-            fname: filename including path of where to save
             flags: string. flags to include as bands in tif
             include_arrays: arrays (i.e. difference) to include as bands in tif
             include_masks: arrays (i.e. overlap_nan) to include as bands in tif
@@ -620,30 +596,53 @@ class MultiArrayOverlap(object):
         # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
         self.mask_overlap_nan = ~self.mask_overlap_nan
 
-        # 2) PREPARE flags for saving
+        # 2) LOSS or GAIN
+        # determine if basin lost or gained snow and how much
+        # Loss or Gain determines which flags will be included in flag array
+        file_path_snownc1, file_path_snownc2 = \
+                        return_snow_files(self.file_path_snownc, \
+                                        self.date1_string, self.date2_string)
 
+        # self.gaining, basin_total_change, basin_avg_change = \
+        #         determine_basin_change(file_path_snownc1, file_path_snownc2,
+        #                             file_path_topo, self.file_path_out_base,
+                                    # 'thickness')
+
+        self.gaining = False
+        # temp dates to pass into log message
+        temp_date1 = file_path_snownc1.split('/')[-1]
+        temp_date2 = file_path_snownc2.split('/')[-1]
+        # # turn True or False into string = 'gaining' or 'losing' for log message
+        # gain_loss = 'gaining' * self.gaining + 'losing' * (not self.gaining)
+        # log_message = '\nTotal basin_difference in depth ("thickness")'\
+        #                 '\ncalculated between {0} and {1} is {2}m.' \
+        #                 '\nThe average change in areas where depth changed, ' \
+        #                 '\ni.e. where snow was present in either of the two dates,' \
+        #                 '\nwas {3} m.' \
+        #                 '\nAs such the basin is considered to be "{4}.' \
+        #                 '\nFlags will be determined accordingly\n'.format \
+        #                 (temp_date1, temp_date2, str(int(round(basin_total_change, 0))), \
+        #                 str(round(basin_avg_change,2)), gain_loss)
+        # self.log.info(log_message)
+
+        # 3) PREPARE flags for saving
         # if basin loses or gains overall, remove applicable flags from analysis
         # as they will be noisy
-        if self.basin_gain:
-            flags.remove('basin_gain')
+        if self.gaining:
+            flag_attribute_names.remove('flag_basin_gain')
         else:
-            flags.remove('basin_loss')
-
-        # affix 'flag_' to each name because that's how they've been saved
-        flag_names = ['flag_' + flag_name for flag_name in flags]
+            flag_attribute_names.remove('flag_basin_loss')
 
         # append masks to flags list to save to tiff
         if include_masks != None:
             for mask in include_masks:
-                flag_names.append('mask_' + mask)
+                flag_attribute_names.append('mask_' + mask)
 
-        # Technically not a flag, but we want boolean with vegetation presence
-        flag_names.append('veg_present')
 
         # finally, change abbreviated attribute names to intuitive band names
-        band_names = apply_dict(flag_names, self.keys_master, 'mat_object_to_tif')
+        band_names = apply_dict(flag_attribute_names, self.keys_master, 'mat_object_to_tif')
 
-        # 3) RESTORE clipped arrays/flags to original size, extent etc:
+        # 4) RESTORE clipped arrays/flags to original size, extent etc:
 
         # if input tif files were less than desired 50m output
         meta2_clip = getattr(self, 'meta2_te')
@@ -665,7 +664,7 @@ class MultiArrayOverlap(object):
             buffer = self.buffer
             # buffer flag arrays with nans to fit original date2 array shape
             # nan = <uint> 255
-            for id, band in enumerate(flag_names):
+            for id, band in enumerate(flag_attribute_names):
                 flag_buffer = np.full(self.orig_shape, fill_val, dtype = flag_dtype)
                 mat_temp = getattr(self, band)
                 if not_50m:
@@ -682,24 +681,24 @@ class MultiArrayOverlap(object):
 
         # upate metadata to include number of bands (flags) and uint8 dtype
         self.meta2_te.update({
-            'count': len(flag_names),
+            'count': len(flag_attribute_names),
             'dtype': flag_dtype,
             'nodata': fill_val})
 
-        # 4) WRITE Flags.tif
+        # 5) WRITE Flags.tif
         with rio.open(self.file_path_out_tif_flags, 'w', **self.meta2_te) as dst:
-            for id, band in enumerate(flag_names, start = 1):
+            for id, band in enumerate(flag_attribute_names, start = 1):
                 try:
-                    mat_temp = getattr(self, flag_names[id - 1])
+                    mat_temp = getattr(self, flag_attribute_names[id - 1])
                     dst.write_band(id, mat_temp.astype(flag_dtype))
                     dst.set_band_description(id, band_names[id - 1])
                 except ValueError:  # Rasterio has no float16  >> cast to float32
                     self.log.debug('Try except in save_tiff: if triggered, investigate')
-                    mat_temp = getattr(self, flag_names[id - 1])
+                    mat_temp = getattr(self, flag_attribute_names[id - 1])
                     dst.write_band(id, mat_temp.astype(flag_dtype))
                     dst.set_band_description(id, band_names[id - 1])
 
-        # 4a) if images need rescaling to 50m
+        # 5a) if images need rescaling to 50m
         if not_50m:
             fp_temp_base = os.path.splitext(self.file_path_out_tif_flags)[-2]
             fp_temp = '{}_temp.tif'.format(fp_temp_base)
@@ -709,7 +708,7 @@ class MultiArrayOverlap(object):
 
         # REPEAT steps 3) and 4) for saving arrays i.e. diff and diff_norm
 
-        # 3) RESTORE clipped arrays/flags to original size, extent etc:
+        # 4) RESTORE clipped arrays/flags to original size, extent etc:
         # First determine number of rows and columns to buffer with NaNs
         if include_arrays != None:
             array_names = []
@@ -738,7 +737,7 @@ class MultiArrayOverlap(object):
                 'dtype': 'float32',
                 'nodata': -9999})
 
-            # 4) Write Arrays.tif
+            # 5 Write Arrays.tif
             with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
                 for id, band in enumerate(array_names, start = 1):
                     # try:
@@ -750,10 +749,7 @@ class MultiArrayOverlap(object):
                     dst.write_band(id, mat_temp.astype('float32'))
                     dst.set_band_description(id, band_names[id - 1])
 
-        self.flag_names = flag_names
-        self.array_names = array_names
-
-        # 5) CLEANUP. Now all is complete, DELETE clipped files from
+        # 7) CLEANUP. Now all is complete, DELETE clipped files from
         # clip_extent_overlap() upon user specification in UserConfig,
         try:
             if self.remove_clipped_files == True:
@@ -766,31 +762,46 @@ class MultiArrayOverlap(object):
         log_message = 'save tiff = {} seconds'.format(round(tock - tick, 2))
         self.log.debug(log_message)
 
-    def get_flag_names(self, flags):
+    def format_flag_names(self, flags, prepend):
         """
-        PREPARE bands to be saved to tif
-        To simplify UserConfig, options were 'basin_block' 'elevation_block' and/or 'tree'
-        Each of these values yield 'loss' and 'gain' flags for each.
-        Below code simply parses the three user config values into loss and gain
-        flag names
+        Maps flags from UserConfig names to attribute names and vice versa.
+        Also, expands UserConfig flag name 'basin' and 'elevation' into
+        loss and gain flags for both
+        - i.e. dict['basin'] = 'flag_basin_loss' and 'flag_basin_gain'
 
-        Arguments:
-            flags:  flag names
-        Outputs:
-            flag_names:     list of flag names
+        Args:
+            flags:      string list of UserConfig or attribute flag names
+            prepend:    <boolean> True to prepend flags with 'flag_'
+                        i.e. dict['histogram'] = 'flag_histogram'.
+                        False will map the reverse, from 'flag_<name>' to 'flag'
+        Returns:
+            flag_names:  list of mapped flag names
         """
+
+        flag_dict = {'prepend_flag':{'histogram':'flag_histogram',
+                                'zero_and_nan':'flag_zero_and_nan',
+                                'basin':['flag_basin_gain', 'flag_basin_loss'],
+                                'elevation':['flag_elevation_gain',
+                                            'flag_elevation_loss']},
+                    'remove_flag':{'flag_histogram':'histogram',
+                                    'flag_zero_and_nan':'zero_and_nan',
+                                    'flag_basin_gain':'basin_gain',
+                                    'flag_basin_loss':'basin_loss',
+                                    'flag_elevation_gain':'elevation_gain',
+                                    'flag_elevation_loss':'elevation_loss'}}
+        if prepend is True:
+            action_key = 'prepend_flag'
+        else:
+            action_key = 'remove_flag'
+
         flag_names = []
-        for flag in flags:
-            if flag not in ['basin_block', 'elevation_block', 'tree']:
-                flag_names.append('flag_' + flag)
-                # flagged = getattr(self, flag_flags[i])
+        for flag_name in flags:
+            temp_flag = flag_dict[action_key][flag_name]
+            if type(temp_flag) is list:
+                [flag_names.append(name) for name in temp_flag]
             else:
-                if flag in ['basin_block']:
-                    flag_names.extend(('flag_basin_loss', 'flag_basin_gain'))
-                elif flag in ['elevation_block']:
-                    flag_names.extend(('flag_elevation_loss', 'flag_elevation_gain'))
-                elif flag in ['tree']:
-                    flag_names.extend(('flag_tree_loss', 'flag_tree_gain'))
+                flag_names.append(temp_flag)
+
         return(flag_names)
 
     def plot_hist(self, action):
@@ -978,15 +989,16 @@ class PatternFilters():
         return(pct)
 
 class Flags(MultiArrayOverlap, PatternFilters):
-    def init(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-            file_out_root, basin, file_name_modifier, elevation_band_resolution,
-            file_path_snownc):
+    # def init(self, file_path_dataset1, file_path_dataset2, file_path_topo,
+    #         file_out_root, basin, file_name_modifier, elevation_band_resolution,
+    #         file_path_snownc):
+    def init(self):
         """
         Protozoic attempt of use of inheritance
         """
-        MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2,
-                                file_path_topo, file_out_root, basin,
-                                file_name_modifier, file_path_snownc)
+        # MultiArrayOverlap.init(self, file_path_dataset1, file_path_dataset2,
+        #                         file_path_topo, file_out_root, basin,
+        #                         file_name_modifier, file_path_snownc)
 
     @profile
     def make_histogram(self, name, nbins, thresh, moving_window_size):
@@ -1049,7 +1061,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                         (round(tock - tick, 2))
         self.log.debug(log_message)
 
-    def flag_basin_blocks(self, apply_moving_window, moving_window_size, \
+    @profile
+    def flag_basin(self, apply_moving_window, moving_window_size, \
                             neighbor_threshold, snowline_threshold):
         """
         Finds cells of complete melt or snow where none existed prior.
@@ -1110,10 +1123,10 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.log.info(log_msg1)
 
     @profile
-    def flag_elevation_blocks(self, apply_moving_window, moving_window_size,
+    def flag_elevation(self, apply_moving_window, moving_window_size,
             neighbor_threshold, snowline_threshold, outlier_percentiles):
         """
-        More potential for precision than flag_basin_blocks function.  Finds outliers
+        More potential for precision than flag_basin function.  Finds outliers
         in relation to their elevation bands for snow gain and loss and adds as attributed
         By default in CoreConfig, elevation gain finds pixels where BOTH raw snow gained AND
         normalized snow gained were greater than outlier_percentiles.
@@ -1126,9 +1139,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
         Args:
             apply_moving_window: Boolean. Moving window is optional
-            moving_window_size:  Same as flag_basin_blocks
-            neighbor_threshold:  Same as flag_basin_blocks
-            snowline_threshold:  Same as flag_basin_blocks
+            moving_window_size:  Same as flag_basin
+            neighbor_threshold:  Same as flag_basin
+            snowline_threshold:  Same as flag_basin
             outlier_percentiles:  list of four values (raw gain upper, raw loss upper, normalized gain lower, normalized loss lower)
                                     Percentiles used to threshold each elevation band.  i.e. 95 in (95,80,10,10) is the raw gain upper,
                                     which means anything greater than the 95th percentile of raw snow gain in each elevatin band will
@@ -1138,7 +1151,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
             flag_elevation_loss:  attribute
             flag_elevation_gain   attribute
         """
-        self.log.debug('entering flag_elevation_blocks')
+        self.log.debug('entering flag_elevation')
         tick = time.clock()
 
         # Masking bare ground areas because zero change in snow depth will skew
@@ -1277,15 +1290,18 @@ class Flags(MultiArrayOverlap, PatternFilters):
         tock = time.clock()
         log_msg1 = 'flag_elevation = {} seconds'.format(round(tock - tick, 2))
         self.log.debug(log_msg1)
-    def stats_report(self, flags):
+    def stats_report(self, flag_attribute_names):
+        """
+        quick utility to print out table of stats to shell and save to log
+        """
         map_id_dem, id_dem_unique, elevation_edges = \
             get_elevation_bins(self.dem_clip, self.mask_nan_snow_present, \
                                 self.elevation_band_resolution)
 
-        flags = self.get_flag_names(flags)
         mat_diff = self.mat_diff.copy()
         delta, cell_count, pct_coverage = [], [], []
-        for flag_name in flags:
+        print('mask_overlap shape ', self.mask_overlap_nan.shape)
+        for flag_name in flag_attribute_names:
             row = []
             flag = getattr(self, flag_name)
             mask_temp = self.mask_nan_snow_present & ~flag
@@ -1320,7 +1336,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
             pct_coverage_temp = cell_count_temp / np.sum(self.mask_nan_snow_present)
             pct_coverage_temp = round((pct_coverage_temp * 100),1)
             pct_coverage.append('{}%'.format(pct_coverage_temp))
-        df = pd.DataFrame({'flag' : flags, 'cell count' : cell_count, '*percent coverage' : pct_coverage, '**\u0394' : delta})
+        df = pd.DataFrame({'flag' : flag_attribute_names, 'cell count' : cell_count, '*percent coverage' : pct_coverage, '**\u0394' : delta})
         df = df[['flag', 'cell count', '*percent coverage', '**\u0394']]
         table = tabulate(df, headers='keys', colalign = ["left", "left", "right", "left", "right"], tablefmt = "github")
         table_footer = '\n\n*percent coverage = percent of flagged cells relative to total cells with snow present' \

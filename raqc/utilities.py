@@ -429,10 +429,11 @@ def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
         file_path_base:     just for object naming purposes
         band:               Could theoretically select a band other than 'thickness'
     Returns:
-        basin_gain:       True if basin gained snow.  False if basin lost snow.
-                        this will be used later to
-        basin_total_change:
-        basin_gain, basin_total_change, basin_avg_change
+        gaining:       True if basin gained snow.  False if basin lost snow.
+                        this will be used later to shed a noisy flag
+        basin_total_change:  total change within basin mask (from topo.nc) and
+                            where snow was present on at least one date
+        basin_avg_change:    same as total change, but average
     """
     import sys
 
@@ -472,9 +473,9 @@ def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
     basin_avg_change = round(basin_total_change / basin_area, 2)
 
     if basin_total_change > 0:
-        basin_gain = True
+        gaining = True
     else:
-        basin_gain = False
+        gaining = False
 
     cbar_string = '\u0394 thickness (m)'
     suptitle_string = '\u0394 snow thickness (m): snow.nc run{}_to_{}'. \
@@ -482,7 +483,7 @@ def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
 
     # basic_plot(diff, zeros_and_mask, cbar_string, suptitle_string, file_path_out)
 
-    return basin_gain, basin_total_change, basin_avg_change
+    return gaining, basin_total_change, basin_avg_change
 
 def return_snow_files(file_path_snownc, year1, year2):
     # Snow.nc file paths
