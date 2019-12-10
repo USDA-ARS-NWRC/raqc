@@ -5,18 +5,24 @@ import copy
 from raqc.utilities import format_date
 import pandas as pd
 
-'''used to agglomerate awsm_daily run outputs into one .nc file'''
+'''
+used to agglomerate awsm_daily run outputs into one .nc file
+choose start date, end date and time step in days.
+'''
 
 fp = os.path.dirname(os.path.abspath(__file__))
 
 parser = argparse.ArgumentParser(description = 'agglomerate single date netCDF \
                                                 files into single file')
-parser.add_argument('--dir-in', default = os.getcwd(),
+parser.add_argument('--dir-in', required = True, default = os.getcwd(),
                     help = 'directory where awsm_daily run folders reside')
-parser.add_argument('--base-file', default = 'snow.nc', help = 'filename in \
-                    subdirectories being concatenated i.e. snow.nc')
+parser.add_argument('--base-file', required = True, default = 'snow.nc',
+                    help = 'filename in subdirectories being concatenated \
+                            i.e. snow.nc')
 parser.add_argument('--file-out', required = True, help = 'filename and path of \
                     new file with file type extension i.e. .nc')
+parser.add_argument('--variable_name', required = True, help = 'variable name \
+                        to grab from nc file')
 parser.add_argument('--start-date', help = 'start date in format YYYYMMDD',
                         type = int)
 parser.add_argument('--end-date', help = 'end date in format YYYYMMDD', \
@@ -87,7 +93,7 @@ timespan_subdirectory = subdirectory_end - subdirectory_start
 timespan_subset = subset_end - subset_start
 # create list of num days to add to start date for producing datetime objects
 # of all dates in directory
-temp_list = list(range(0, timespan_subdirectory.days))
+temp_list = list(range(0, timespan_subdirectory.days +1))
 subdirectory_dates = [subdirectory_start + pd.to_timedelta(d, unit = 'D') for d in temp_list]
 # create list of num days to add to create list of datetime objects for specified
 # start, stop and increment
@@ -107,9 +113,9 @@ files_in = [files_in_temp[ids] for ids in ids]
 files_in = ' '.join(files_in)
 
 file_out = os.path.abspath(os.path.expanduser(args.file_out))
-# NOTE: cmd is command line call.  IF script needs to be modified to concatenate
-# a different band(variable), simply replace 'thickness' with desired band name.
 
-cmd = 'ncrcat -v {} {} {}'.format('cold_content', files_in, file_out)
+cmd = 'ncrcat -O -v {} {} {}'.format(args.variable_name, files_in, file_out)
+
+print('The command run in shell was: \n\n{0}'.format( cmd))
 
 check_output(cmd, shell=True)  # t = text output

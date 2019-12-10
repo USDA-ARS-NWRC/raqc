@@ -67,7 +67,9 @@ def main():
         threshold_histogram_space = cfg['histogram_outliers']['threshold_histogram_space']
         moving_window_name = cfg['histogram_outliers']['moving_window_name']
         moving_window_size = cfg['histogram_outliers']['moving_window_size']
+        want_plot = cfg['histogram_outliers']['plot']
         raqc_obj.make_histogram(histogram_mats, num_bins, threshold_histogram_space, moving_window_size)
+        raqc_obj.plot_hist(want_plot)
 
     # if user wants to check for blocks via 2D moving window
     apply_moving_window = cfg['block_behavior']['apply_moving_window']
@@ -87,14 +89,18 @@ def main():
                             block_window_size, block_window_threshold,
                             snowline_threshold, outlier_percentiles)
 
-    want_plot = cfg['options']['plot']
-    raqc_obj.plot_hist(want_plot)
-
     file_out = cfg['paths']['file_path_out']
     include_arrays = cfg['options']['include_arrays']
     include_masks = cfg['options']['include_masks']
 
     # Output statistics table to log
+    # first remove flag_zero_and_nan because statistics are based on pixels
+    # where snow was present
+    try:
+        flag_attribute_names.remove('flag_zero_and_nan')
+    except ValueError:
+        pass
+
     raqc_obj.stats_report(flag_attribute_names)
 
     # Almost done! Save flags and arrays to Tif

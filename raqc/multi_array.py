@@ -811,17 +811,17 @@ class MultiArrayOverlap(object):
                     'nodata':255})
 
         # create strings for band descriptions
-        pct_list = ['{}% thresh'.formt(int(pct * 100)) for pct in pct_list]
-        band_desc.extent(pct_list)
+        pct_list = ['{}% thresh'.format(int(pct * 100)) for pct in pct_list]
+        band_desc.extend(pct_list)
 
         # write array to tif
         with rio.open(fp_out, 'w', **meta) as dst:
-            for i in len(shape.temp_stack[0]):
+            for i in range(temp_stack.shape[0]):
                 dst.set_band_description(i + 1, '{}% thresh'.format(band_desc[i]))
             dst.write(temp_stack)
 
         with rio.open(fp_temp, 'w', **meta) as dst:
-            for i in len(shape.temp_stack[0]):
+            for i in range(temp_stack.shape[0]):
                 dst.set_band_description(i + 1, '{}% thresh'.format(band_desc[i]))
             dst.write(temp_stack)
 
@@ -1364,7 +1364,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
         mat_diff = self.mat_diff.copy()
         delta, cell_count, pct_coverage = [], [], []
-        print('mask_overlap shape ', self.mask_overlap_nan.shape)
         for flag_name in flag_attribute_names:
             row = []
             flag = getattr(self, flag_name)
@@ -1373,6 +1372,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
             map_id_dem_clip = map_id_dem[mask_temp]
 
             median_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
+            
             # save bin statistics per elevation bin to a numpy 1D Array i.e. list
             for id, id_dem_unique2 in enumerate(id_dem_unique):
                 median_raw[id] = np.percentile(mat_diff_clip[map_id_dem_clip == \
