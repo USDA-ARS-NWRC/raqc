@@ -699,12 +699,9 @@ class MultiArrayOverlap(object):
                     dst.set_band_description(id, band_names[id - 1])
 
         # 5a) if images need rescaling to 50m
+        # reference readme.md for details on 50m flag tif
         if not_50m:
-            fp_temp_base = os.path.splitext(self.file_path_out_tif_flags)[-2]
-            fp_temp = '{}_temp.tif'.format(fp_temp_base)
-            cmd = 'gdalwarp -r average -overwrite -tr 50 50 {0} {1}' \
-                    .format(self.file_path_out_tif_flags, fp_temp)
-            run(cmd, shell = True)
+            self.rescale_to_50m()
 
         # REPEAT steps 3) and 4) for saving arrays i.e. diff and diff_norm
 
@@ -761,6 +758,73 @@ class MultiArrayOverlap(object):
         tock = time.clock()
         log_message = 'save tiff = {} seconds'.format(round(tock - tick, 2))
         self.log.debug(log_message)
+
+    def rescale_to_50m(self):
+        """
+        Final step in resampling finer spatial resolution flags to 50m.
+        Takes 50m flag.tif and saves multi-banded tif based off thresholds.
+        If [0.1 0.2 0.3] or 10, 20 and 30% were passed to function, then output
+        tif will have 3 bands for each of those percentages.
+        For example a pct = 0.1 (10%) will flag 50m pixels that contained >=10%
+        of the original finer resolution flag tif from which it was resampled.
+        Simple theoretical example, if resampling a 5m flag.tif to a 50m:
+        The 50m contains 100 5m pixels (10X10 grid).  For a given 50m pixel, if
+        10 composing 50m pixels were flags, then the 50m pixel would be flagged
+        at the 10% band but NOT the 20% band.  If only 9 pixels out of 100 were
+        flagged, then the flag would be false for that 50m pixel.
+        """
+
+        # Create file paths
+        fp_temp_base = os.path.splitext(self.file_path_out_tif_flags)[-2]
+        fp_temp = '{}_temp.tif'.format(fp_temp_base)
+        fp_out = '{}_50cm'.format(fp_temp_base)
+
+        # resample from finer resolution to 50m
+        cmd = 'gdalwarp -r average -overwrite -tr 50 50 {0} {1}' \
+                .format(self.file_path_out_tif_flags, fp_temp)
+        # run gdal command through shell
+        run(cmd, shell = True)
+
+        # Note flag is dtype float32 since it's a percentage
+        with rio.open(fp_temp) as src:
+            rio_obj = src
+            meta = rio_obj.profile
+            arr = rio_obj.read()[:]
+            # rio.obj_descriptions are from set_band_descriptions, they are
+            # hacky substitutes for variable names in netCDFs
+            band_desc = list(rio_obj.descriptions)
+        pct_list = [0.1, 0.2, 0.3]
+
+        # stack thresholded bands into multilayered np array (temp_stack)
+        for pct in pct_list:
+            temp_arr = np.sum((arr > pct) * 1, axis = 0)
+            temp_arr = temp_arr[np.newaxis]
+            if 'temp_stack' not in locals():
+                temp_stack = np.ndarray.astype(temp_arr, 'uint8')
+            else:
+                temp_stack = np.concatenate \
+                    ((temp_stack, np.ndarray.astype(temp_arr, 'uint8')), axis = 0)
+
+        # update metada
+        meta.update({'count':len(pct_list),
+                    'dtype':'uint8',
+                    'nodata':255})
+
+        # create strings for band descriptions
+        pct_list = ['{}% thresh'.formt(int(pct * 100)) for pct in pct_list]
+        band_desc.extent(pct_list)
+
+        # write array to tif
+        with rio.open(fp_out, 'w', **meta) as dst:
+            for i in len(shape.temp_stack[0]):
+                dst.set_band_description(i + 1, '{}% thresh'.format(band_desc[i]))
+            dst.write(temp_stack)
+
+        with rio.open(fp_temp, 'w', **meta) as dst:
+            for i in len(shape.temp_stack[0]):
+                dst.set_band_description(i + 1, '{}% thresh'.format(band_desc[i]))
+            dst.write(temp_stack)
+
 
     def format_flag_names(self, flags, prepend):
         """

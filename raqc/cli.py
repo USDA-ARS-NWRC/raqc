@@ -45,11 +45,18 @@ def main():
 
     raqc_obj.mask_basic()
 
-    flags = cfg['options']['flags']
-    # turn simple UserConfig flag names into verbose, attribute names
+    # add histogram flag if desired for analysis
+    flags = ['basin', 'elevation', 'zero_and_nan']
+    if cfg['histogram_outliers']['include_hist_flag']:
+        flags.append('histogram')
+
+    # Translate UserConfig flag names into verbose, attribute names
+    # i.e. 'basin' becomes 'flag_basin' in this list and self.flag_basin
+    # attribute in raqc_object (raqc_obj)
     flag_attribute_names = raqc_obj.format_flag_names(flags, True)
 
-    if 'flag_histogrom' in flag_attribute_names:
+    # code block only executed if UserConfig specifies histogram flag
+    if cfg['histogram_outliers']['include_hist_flag']:
         histogram_mats = cfg['histogram_outliers']['histogram_mats']
         action = cfg['histogram_outliers']['action']
         operator = cfg['histogram_outliers']['operator']
@@ -62,15 +69,18 @@ def main():
         moving_window_size = cfg['histogram_outliers']['moving_window_size']
         raqc_obj.make_histogram(histogram_mats, num_bins, threshold_histogram_space, moving_window_size)
 
-    # if user wants to check for blocks
+    # if user wants to check for blocks via 2D moving window
     apply_moving_window = cfg['block_behavior']['apply_moving_window']
     block_window_size = cfg['block_behavior']['moving_window_size']
     block_window_threshold = cfg['block_behavior']['neighbor_threshold']
+
     # minimum snow depth for determining snowline elevation
     snowline_threshold = cfg['thresholding']['snowline_threshold']
 
+
     raqc_obj.flag_basin(apply_moving_window, block_window_size,
                             block_window_threshold, snowline_threshold)
+
 
     outlier_percentiles = cfg['thresholding']['outlier_percentiles']
     raqc_obj.flag_elevation(apply_moving_window,
