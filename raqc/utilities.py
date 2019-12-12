@@ -238,6 +238,7 @@ def check_DEM_resolution(dem_clip, elevation_band_resolution):
     Args:
         dem_clip:                   just a dem that may or may not be clipped
         elevation_band_resolution:  resolution of bin increments i.e. 50m
+    Returns
     """
     min_elev, max_elev = np.min(dem_clip), np.max(dem_clip)
     num_elev_bins = math.ceil((max_elev - min_elev) / elevation_band_resolution)
@@ -250,17 +251,20 @@ def check_DEM_resolution(dem_clip, elevation_band_resolution):
         '\nEnter a new resolution ---> (Must be no finer than {0})'.format(min_elev_band_rez))
 
         while True:
-            response = input()
+            elevation_band_resolution = input()
             try:
-                response = float(response)
+                elevation_band_resolution = float(elevation_band_resolution)
             except ValueError:
                 print('must enter a float or integer')
             else:
-                if response > min_elev_band_rez:
-                    print('your new elevation_band_resolution will be: {}. Note that this will NOT be reflected on your backup_config.ini file'.format(response))
+                if elevation_band_resolution > min_elev_band_rez:
+                    print('your new elevation_band_resolution will be: {}'
+                            .format(elevation_band_resolution))
                     break
                 else:
-                    print('Value still too fine. Enter a new resolution ---> must be no finer than{0})'.format(min_elev_band_rez))
+                    print('Value still too fine. Enter a new resolution ---> '
+                        'must be no finer than{0})'.format(min_elev_band_rez))
+    return(elevation_band_resolution)
 def get16bit(array):
     """
     Converts array into numpy 16 bit integer
@@ -459,19 +463,25 @@ def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
         mask = mask_obj.read()
 
     # Get statistics on snow depth change
+    # snownc1 and snownc2 are now the arrays of specified band (thickness)
     snownc1 = snownc1[0]
     snownc2 = snownc2[0]
+    # basin mask array
     mask = mask[0]
     mask = np.ndarray.astype(mask, np.bool)
+    # only interested in pixels with snow on at least one day
     both_zeros = (np.absolute(snownc1) ==0) & (np.absolute(snownc2) == 0)
     zeros_and_mask = mask & ~both_zeros
+    # snow property change (thickness)
     diff = snownc2 - snownc1
+    # only within mask where snow present
     diff_clipped_to_mask = diff[zeros_and_mask]
 
     basin_total_change = np.sum(diff_clipped_to_mask)
     basin_area = diff_clipped_to_mask.shape[0]
     basin_avg_change = round(basin_total_change / basin_area, 2)
 
+    # determine if basin-wide snow depth is gaining or losing
     if basin_total_change > 0:
         gaining = True
     else:
@@ -481,6 +491,7 @@ def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
     suptitle_string = '\u0394 snow thickness (m): snow.nc run{}_to_{}'. \
                         format(date1, date2)
 
+    # # plot and save
     # basic_plot(diff, zeros_and_mask, cbar_string, suptitle_string, file_path_out)
 
     return gaining, basin_total_change, basin_avg_change

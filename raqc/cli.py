@@ -41,9 +41,9 @@ def main():
 
     raqc_obj.make_diff_mat()
 
-    # Add check_config
-
     raqc_obj.mask_basic()
+
+    raqc_obj.determine_basin_change('thickness')
 
     # add histogram flag if desired for analysis
     flags = ['basin', 'elevation', 'zero_and_nan']
@@ -94,20 +94,38 @@ def main():
     include_masks = cfg['options']['include_masks']
 
     # Output statistics table to log
-    # first remove flag_zero_and_nan because statistics are based on pixels
+    # first remove unnecessary flags
+    # remove flag_zero_and_nan because statistics in table are based on pixels
     # where snow was present
+    # Note replace_zero_nan is needed to futureproof changes to flag options
+    # by developer.  currently try except unneccessary as flag_zero_nan
+    # is not an optional flag
     try:
         flag_attribute_names.remove('flag_zero_and_nan')
+        replace_zero_nan = True
     except ValueError:
+        replace_zero_nan = False
         pass
+
+    # remove noisy flags based on total basin gain or loss determination
+    if raqc_obj.gaining:
+        flag_attribute_names.remove('flag_basin_gain')
+    else:
+        flag_attribute_names.remove('flag_basin_loss')
 
     raqc_obj.stats_report(flag_attribute_names)
 
     # Almost done! Save flags and arrays to Tif
+    # First add back the zero_and_nan flag
+    if replace_zero_nan:
+        flag_attribute_names.append('flag_zero_and_nan')
+
     raqc_obj.save_tiff(flag_attribute_names, include_arrays, include_masks)
 
     #backup config file
     config_backup_location = raqc_obj.file_path_out_backup_config
+    cfg['thresholding']['elevation_band_resolution'] = \
+                                    raqc_obj.elevation_band_resolution
     ucfg.cfg = cfg
     generate_config(ucfg, config_backup_location)
 

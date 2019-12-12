@@ -18,7 +18,7 @@ from memory_profiler import profile
 from .utilities import prep_coords, get_elevation_bins, check_DEM_resolution, \
                         evenly_divisible_extents, get16bit, update_meta_from_json, \
                         apply_dict, create_clipped_file_names, format_date, \
-                        determine_basin_change, snowline, return_snow_files, \
+                        snowline, return_snow_files, \
                         debug_fctn
 from tabulate import tabulate
 import pandas as pd
@@ -135,7 +135,6 @@ class MultiArrayOverlap(object):
         # Always write log file to <output>/log.txt
         log_file = self.file_name_base + '_log.txt'
         self.log = logging.getLogger(__name__)
-        print('mod name ', __name__)
 
         # Log to file, no screen output.
         logging.basicConfig(filename=log_file, filemode='w+',
@@ -186,9 +185,7 @@ class MultiArrayOverlap(object):
                 sys.exit('Exiting ---- Ensure all clipped files present or simply'
                 '\npass original snow depth and topo files\n')
             else:
-                self.file_path_date1_clipped = file_path_dataset1
-                self.file_path_date2_clipped = file_path_dataset2
-                self.file_name_dem_clipped = self.file_path_dem_te
+                pass
 
         # 5) CLIPPED FILES EXIST but not passed in Config
         # i.e.orig file passed in UserConfig, but clipped exist in directory
@@ -197,11 +194,12 @@ class MultiArrayOverlap(object):
                 \nfile path.  No new files need to be created; existing  \
                 \nclipped files will be used\n'
         log_msg2 = '\nHowever: \
-                \n{0}_dem_common_extent and \
+                \n{0}_dem_common_extent AND \
                 \n{0}_veg_height_common_extent \
                 \nmust exist in order to use clipped files. \
-                \nRun will proceed, and original snow depth and topo files \
-                \nwill be clipped (original files will be retained)\n'. \
+                \nRun will proceed. Topo files will be rescaled and clipped \
+                \n(original files will be retained) to match extents and rez \
+                \nof clipped snow files passed in UserConfig\n'. \
                 format(self.file_name_base)
         # User did not passed clipped files, but below code block automatically
         # detects the existence of clipped files based on file name
@@ -210,29 +208,30 @@ class MultiArrayOverlap(object):
             if os.path.isfile(self.file_path_date1_te) & os.path.isfile \
                               (self.file_path_date2_te):
                 self.log.info(log_msg1)
+
                 # check for existence of clipped dem and veg from topo.nc
                 if (os.path.isfile(self.file_path_dem_te) & \
                     os.path.isfile(self.file_path_veg_te)):
-                    topo_clip_present = True
-                else:
-                    topo_clip_present = False
-                    self.log.info(log_msg2)
-                # set file paths and indicate if clipped using self.already_clipped
-                if topo_clip_present:
-                    self.file_path_date1_clipped = self.file_path_date1_te
-                    self.file_path_date2_clipped = self.file_path_date2_te
-                    self.file_name_dem_clipped = self.file_path_dem_te
                     self.already_clipped = True
-                if not topo_clip_present:
-                    self.file_path_dataset1 = file_path_dataset1
-                    self.file_path_dataset2 = file_path_dataset2
-                    self.file_path_topo = file_path_topo
-            else:
-                self.file_path_dataset1 = file_path_dataset1
-                self.file_path_dataset2 = file_path_dataset2
-                self.file_path_topo = file_path_topo
 
+                # while clipped snow files were present, topo-derived files
+                # were not (i.e. dem and veg clipped). This will set
+                # the already_clipped attribute to False and via cli.py, run
+                # clip_extent_overlay method to clip topo derived files
+                else:
+                    self.log.info(log_msg2)
 
+        # Unncessary else statement included to explicitly comment logic:
+        # Clipped files were not passed to UserConfig and indeed
+        # they did not exist in run directory
+        else:
+            pass
+
+        # These paths only needed for clip_extent_overlap, but setting here
+        # codeset more parsimonious
+        self.file_path_dataset1 = file_path_dataset1
+        self.file_path_dataset2 = file_path_dataset2
+        self.file_path_topo = file_path_topo
 
     debug_fctn()
 
@@ -252,6 +251,7 @@ class MultiArrayOverlap(object):
         # a. Save original metadata to json formated txt file
         #     date1 or date2 should both work?  Vestige from when date mattered..
         # b. get information on extents and resolution
+        # Zach check warning from log here WARNING %s in %s
         with rio.open(self.file_path_dataset2) as src:
             meta2 = src.profile
 
@@ -276,17 +276,11 @@ class MultiArrayOverlap(object):
 
         # 2) Create strings to prepare files using OS.run
 
-        # create file paths of clipped files
-        file_path_dem_te = self.file_name_base + '_dem_common_extent.tif'
-        file_path_veg_te = self.file_name_base + '_veg_height_common_extent.tif'
-        file_path_dem = self.file_name_base + '_dem.tif'
-        file_path_veg = self.file_name_base + '_veg.tif'
-
         # list of clipped files that are created in below code
         # to be deleted upon UserConfig preference
         self.remove_clipped_files = remove_clipped_files
         self.new_file_list = [self.file_path_date1_te, self.file_path_date2_te, \
-                                file_path_dem_te, file_path_veg_te]
+                                self.file_path_dem_te, self.file_path_veg_te]
 
         # prepare log messages
         log_msg1 = '\nThe resolution of your topo.nc file differs from repeat arrays' \
@@ -298,75 +292,63 @@ class MultiArrayOverlap(object):
                     '\nDid NOT need clipping.  File copied and renamed as clipped' \
                     '\nbut is the same\n'
 
-        # Pull veg and dem from topo.nc and save as .tif
+        # prepare topo substrings for topo NetCDF
+        # same target rez (flag -tr in gdalwarp) so no resample needed
         if topo_rez_same:
-            run_arg1 = 'gdal_translate -of GTiff NETCDF:"{0}":dem {1}'.format \
-                        (self.file_path_topo, file_path_dem)
+            tr_substring1 = '-of GTiff NETCDF:"{0}":dem {1}'.format \
+                        (self.file_path_topo, self.file_path_dem_te)
 
-            run_arg1b = 'gdal_translate -of GTiff NETCDF:"{0}":veg_height {1}' \
-                        .format(self.file_path_topo, file_path_veg)
+            tr_substring1b = '-of GTiff NETCDF:"{0}":veg_height {1}' \
+                        .format(self.file_path_topo, self.file_path_veg_te)
 
-        # If spatial resolution of DEM differs from snow
-        # Pull veg and dem from topo.nc, rescale and save as .tif
+
+        # If spatial resolution of topo differs from snow files
+        # resample veg and dem from topo.nc to match snow rez,
         else:
             self.log.info(log_msg1)
 
-            run_arg1 = 'gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":dem {2}' \
+            tr_substring1 = '-tr {0} {0} -of GTiff NETCDF:"{1}":dem {2}' \
                         .format(round(rez13[0]), self.file_path_topo, \
-                        file_path_dem)
+                        self.file_path_dem_te)
 
-            run_arg1b ='gdal_translate -of GTiff -tr {0} {0} NETCDF:"{1}":veg_height {2}' \
+            tr_substring1b ='-tr {0} {0} -of GTiff NETCDF:"{1}":veg_height {2}' \
                         .format(round(rez13[0]), self.file_path_topo, \
-                        file_path_veg)
+                        self.file_path_veg_te)
 
         # START Clipping
         if not extents_same:
             # if date1, date2 and topo have different extents  ---> clip
-            run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
+            run_arg1 = 'gdalwarp -te {0} {1} {2} {3} {4} {5} -overwrite'.format \
                         (*min_extents, self.file_path_dataset1, \
-                        self.file_path_date1_te) + ' -overwrite'
+                        self.file_path_date1_te)
 
-            run_arg3 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
+            run_arg2 = 'gdalwarp -te {0} {1} {2} {3} {4} {5} -overwrite'.format \
                         (*min_extents, self.file_path_dataset2, \
-                        self.file_path_date2_te) + ' -overwrite'
+                        self.file_path_date2_te)
 
-            run_arg4 = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format \
-                        (*min_extents, file_path_dem, \
-                        self.file_path_dem_te + ' -overwrite')
+            run_arg3 = 'gdalwarp -te {0} {1} {2} {3} {4} -overwrite'.format \
+                        (*min_extents, tr_substring1)
 
-            run_arg4b = 'gdalwarp -te {0} {1} {2} {3} {4} {5}'.format( \
-                        *min_extents, file_path_veg, \
-                        self.file_path_veg_te + ' -overwrite')
+            run_arg3b = 'gdalwarp -te {0} {1} {2} {3} {4} -overwrite'.format( \
+                        *min_extents, tr_substring1b)
 
         else:
-            # if date1, date2 and topo.nc are the same extents, don't waste time
-            # just copy
+            # if snow files and topo.nc are the same extents,
+            # just copy snow and translate topo. no need to clip or resample
             self.log.info(log_msg2)
 
-            run_arg2 = 'cp {} {}'.format(self.file_path_dataset1,
+            run_arg1 = 'cp {} {}'.format(self.file_path_dataset1,
                         self.file_path_date1_te)
-            run_arg3 = 'cp {} {}'.format(self.file_path_dataset2,
+            run_arg2 = 'cp {} {}'.format(self.file_path_dataset2,
                         self.file_path_date2_te)
-            run_arg4 = 'cp {} {} {}'.format(file_path_dem, self.file_path_dem_te, '-overwrite')
-            run_arg4b = 'cp {} {} {}'.format(file_path_veg, self.file_path_veg_te, '-overwrite')
+            run_arg3 = 'gdal_translate {}'.format(tr_substring1b)
+            run_arg3b = 'gdal_translate {}'.format(tr_substring1b)
 
-        # 3) Now run all commands in proper order
-        run(run_arg1, shell=True)
-        run(run_arg1b, shell=True)
+        # 3) Now run all commands
+        run(run_arg1, shell = True)
         run(run_arg2, shell = True)
         run(run_arg3, shell = True)
-        run(run_arg4, shell = True)
-        run(run_arg4b, shell = True)
-
-        # remove unneeded files
-        run_arg5 = 'rm ' + file_path_veg
-        run_arg5b = 'rm ' + file_path_veg
-        run(run_arg5, shell = True)
-        run(run_arg5b, shell = True)
-
-        self.file_path_date1_clipped = self.file_path_date1_te
-        self.file_path_date2_clipped = self.file_path_date2_te
-        self.file_name_dem_clipped = self.file_path_dem_te
+        run(run_arg3b, shell = True)
 
     @profile
     def mask_basic(self):
@@ -421,7 +403,6 @@ class MultiArrayOverlap(object):
 
         snow_present_mask = ~(date1_zero & date2_zero)  #snow present on at least one date
         self.mask_nan_snow_present = snow_present_mask & self.mask_overlap_nan  # combine nan-free mask with snow present mask
-        print(snow_present_mask.shape, self.mask_overlap_nan.shape)
 
         self.all_gain = date1_zero & (np.absolute(self.mat_clip2) > 0)
 
@@ -471,7 +452,7 @@ class MultiArrayOverlap(object):
             mat_diff:       matrix - date1 depth - date2 depth
             mat_diff_norm:  matrix - mat_diff / date1
         """
-        with rio.open(self.file_path_date1_clipped) as src:
+        with rio.open(self.file_path_date1_te) as src:
             d1_te = src
             mat_clip1 = d1_te.read()  #matrix
             mat_clip1 = mat_clip1[0]
@@ -480,7 +461,7 @@ class MultiArrayOverlap(object):
             mat_clip1[np.isnan(mat_clip1)] = -9999
             mat_clip1 = get16bit(mat_clip1)
             self.mat_clip1 = mat_clip1.copy()
-        with rio.open(self.file_path_date2_clipped) as src:
+        with rio.open(self.file_path_date2_te) as src:
             self.d2_te = src
             self.meta2_te = self.d2_te.profile
             mat_clip2 = self.d2_te.read()  #matrix
@@ -490,7 +471,7 @@ class MultiArrayOverlap(object):
             mat_clip2[np.isnan(mat_clip2)] = -9999
             mat_clip2 = get16bit(mat_clip2)
             self.mat_clip2 = mat_clip2.copy()
-        with rio.open(self.file_name_dem_clipped) as src:
+        with rio.open(self.file_path_dem_te) as src:
             topo_te = src
             dem_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
             dem_clip = dem_clip[0]
@@ -499,8 +480,9 @@ class MultiArrayOverlap(object):
             dem_clip[np.isnan(dem_clip)] = -9999
             self.dem_clip = dem_clip.copy()
             # ensure user_specified DEM resolution is compatible with uint8 i.e. not too fine
-            check_DEM_resolution(self.dem_clip, self.elevation_band_resolution)
-
+            elevation_band_rez = check_DEM_resolution(self.dem_clip,
+                                                self.elevation_band_resolution)
+        self.elevation_band_resolution = elevation_band_rez
         self.all_loss = (np.absolute(mat_clip1) > 0) & (np.absolute(mat_clip2) == 0)  #all loss minimal
         mat_diff = mat_clip2 - mat_clip1  # raw difference
         # self.self.all_loss = (np.absolute(self.mat_clip1).round(2) > 0.0) & (np.absolute(self.mat_clip2).round(2)==0.0)  #all loss minimal
@@ -508,6 +490,100 @@ class MultiArrayOverlap(object):
         mat_diff_norm = np.round((mat_diff / mat_clip1), 2)  #
         self.mat_diff_norm = np.ndarray.astype(mat_diff_norm, np.float16)
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
+
+    def determine_basin_change(self, band):
+        """
+        First pass (nod to Mark for the term "First Pass" for example "I have a P I,
+        here is my first pass at retaining my dignity - I'll shoot 17 consecutive
+        shots 2.5 ft from basket until I win") at determining if basin lost or
+        gained snow.  This short protocol takes two snow.nc files.
+
+        Returns:
+            gaining:       True if basin gained snow.  False if basin lost snow.
+                            this will be used later to shed a noisy flag
+        """
+        # Zach check warning from log here WARNING %s in %s
+        file_path_snownc1, file_path_snownc2 = \
+                        return_snow_files(self.file_path_snownc, \
+                                        self.date1_string, self.date2_string)
+
+        snownc1_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc1, band)
+        snownc2_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc2, band)
+        topo_file_open_rio = 'netcdf:{0}:{1}'.format(self.file_path_topo, 'mask')
+
+        date1 = file_path_snownc1.split('/')[-1][3:11]
+        date2 = file_path_snownc2.split('/')[-1][3:11]
+        file_path_out = os.path.join(self.file_name_base, \
+                    'RAQC_modelled_basin_diff_{}_to_{}.png'.format(date1, date2))
+
+        with rio.open(snownc1_file_open_rio) as src:
+            snownc1_obj = src
+            meta = snownc1_obj.profile
+            snownc1 = snownc1_obj.read()
+
+        with rio.open(snownc2_file_open_rio) as src:
+            snownc2_obj = src
+            snownc2 = snownc2_obj.read()
+
+        with rio.open(topo_file_open_rio) as src:
+            mask_obj = src
+            mask = mask_obj.read()
+
+        # Get statistics on snow depth change
+        # snownc1 and snownc2 are now the arrays of specified band (thickness)
+        snownc1 = snownc1[0]
+        snownc2 = snownc2[0]
+        # basin mask array
+        mask = mask[0]
+        mask = np.ndarray.astype(mask, np.bool)
+        # only interested in pixels with snow on at least one day
+        both_zeros = (np.absolute(snownc1) ==0) & (np.absolute(snownc2) == 0)
+        zeros_and_mask = mask & ~both_zeros
+        # snow property change (thickness)
+        diff = snownc2 - snownc1
+        # only within mask where snow present
+        diff_clipped_to_mask = diff[zeros_and_mask]
+
+        rez = meta['transform'][0]
+        # basin-wide change
+        basin_total_change = np.sum(diff_clipped_to_mask) * (rez ** 2)
+        # number of cells - to get area, multply by cell size
+        total_pixels_in_mask = diff_clipped_to_mask.shape[0]
+        # avg change per pixel
+        basin_avg_change = round((basin_total_change / total_pixels_in_mask) / (rez ** 2), 2)
+
+        # determine if basin-wide snow depth is gaining or losing
+        if basin_total_change > 0:
+            gaining = True
+        else:
+            gaining = False
+
+        cbar_string = '\u0394 thickness (m)'
+        suptitle_string = '\u0394 snow thickness (m): snow.nc run{}_to_{}'. \
+                            format(date1, date2)
+
+        # temp dates to pass into log message
+        temp_date1 = file_path_snownc1.split('/')[-1]
+        temp_date2 = file_path_snownc2.split('/')[-1]
+
+        # turn True or False into string = 'gaining' or 'losing' for log message
+        gain_loss = 'gaining' * gaining + 'losing' * (not gaining)
+        log_message = '\nTotal basin_difference in depth ("thickness")'\
+                        '\ncalculated between {0} and {1} is {2}m.' \
+                        '\nThe average change in areas where depth changed, ' \
+                        '\ni.e. where snow was present in either of the two dates,' \
+                        '\nwas {3} m.' \
+                        '\nAs such the basin is considered to be "{4}.' \
+                        '\nFlags will be determined accordingly\n'.format \
+                        (temp_date1, temp_date2, str(int(round(basin_total_change, 0))), \
+                        str(round(basin_avg_change,2)), gain_loss)
+        self.log.info(log_message)
+
+        # gaining = False
+        self.gaining = gaining
+
+        # # plot and save
+        # basic_plot(diff, zeros_and_mask, cbar_string, suptitle_string, file_path_out)
 
     def get_buffer(self):
         """
@@ -596,48 +672,10 @@ class MultiArrayOverlap(object):
         # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
         self.mask_overlap_nan = ~self.mask_overlap_nan
 
-        # 2) LOSS or GAIN
-        # determine if basin lost or gained snow and how much
-        # Loss or Gain determines which flags will be included in flag array
-        file_path_snownc1, file_path_snownc2 = \
-                        return_snow_files(self.file_path_snownc, \
-                                        self.date1_string, self.date2_string)
-
-        # self.gaining, basin_total_change, basin_avg_change = \
-        #         determine_basin_change(file_path_snownc1, file_path_snownc2,
-        #                             file_path_topo, self.file_path_out_base,
-                                    # 'thickness')
-
-        self.gaining = False
-        # temp dates to pass into log message
-        temp_date1 = file_path_snownc1.split('/')[-1]
-        temp_date2 = file_path_snownc2.split('/')[-1]
-        # # turn True or False into string = 'gaining' or 'losing' for log message
-        # gain_loss = 'gaining' * self.gaining + 'losing' * (not self.gaining)
-        # log_message = '\nTotal basin_difference in depth ("thickness")'\
-        #                 '\ncalculated between {0} and {1} is {2}m.' \
-        #                 '\nThe average change in areas where depth changed, ' \
-        #                 '\ni.e. where snow was present in either of the two dates,' \
-        #                 '\nwas {3} m.' \
-        #                 '\nAs such the basin is considered to be "{4}.' \
-        #                 '\nFlags will be determined accordingly\n'.format \
-        #                 (temp_date1, temp_date2, str(int(round(basin_total_change, 0))), \
-        #                 str(round(basin_avg_change,2)), gain_loss)
-        # self.log.info(log_message)
-
-        # 3) PREPARE flags for saving
-        # if basin loses or gains overall, remove applicable flags from analysis
-        # as they will be noisy
-        if self.gaining:
-            flag_attribute_names.remove('flag_basin_gain')
-        else:
-            flag_attribute_names.remove('flag_basin_loss')
-
         # append masks to flags list to save to tiff
         if include_masks != None:
             for mask in include_masks:
                 flag_attribute_names.append('mask_' + mask)
-
 
         # finally, change abbreviated attribute names to intuitive band names
         band_names = apply_dict(flag_attribute_names, self.keys_master, 'mat_object_to_tif')
@@ -737,11 +775,6 @@ class MultiArrayOverlap(object):
             # 5 Write Arrays.tif
             with rio.open(self.file_path_out_tif_arrays, 'w', **self.meta2_te) as dst:
                 for id, band in enumerate(array_names, start = 1):
-                    # try:
-                    #     print('which arrays: ', array_names[id - 1])
-                    #     dst.write_band(id, getattr(self, array_names[id - 1]))
-                    #     dst.set_band_description(id, band_names[id - 1])
-                    # except ValueError:  # Rasterio has no float16  >> cast to float32
                     mat_temp = getattr(self, array_names[id - 1])
                     dst.write_band(id, mat_temp.astype('float32'))
                     dst.set_band_description(id, band_names[id - 1])
@@ -1358,6 +1391,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         """
         quick utility to print out table of stats to shell and save to log
         """
+
         map_id_dem, id_dem_unique, elevation_edges = \
             get_elevation_bins(self.dem_clip, self.mask_nan_snow_present, \
                                 self.elevation_band_resolution)
@@ -1372,11 +1406,12 @@ class Flags(MultiArrayOverlap, PatternFilters):
             map_id_dem_clip = map_id_dem[mask_temp]
 
             median_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
-            
+
             # save bin statistics per elevation bin to a numpy 1D Array i.e. list
             for id, id_dem_unique2 in enumerate(id_dem_unique):
-                median_raw[id] = np.percentile(mat_diff_clip[map_id_dem_clip == \
-                                                            id_dem_unique2], 50)
+                median_raw[id] = np.percentile(
+                            mat_diff_clip[map_id_dem_clip == id_dem_unique2],
+                            self.elevation_band_resolution)
 
             # Place threshold values onto map in appropriate elevation bin
             # Used to find elevation based outliers
