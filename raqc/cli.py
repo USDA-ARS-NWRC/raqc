@@ -91,7 +91,6 @@ def main():
 
     file_out = cfg['paths']['file_path_out']
     include_arrays = cfg['options']['include_arrays']
-    include_masks = cfg['options']['include_masks']
 
     # Output statistics table to log
     # first remove unnecessary flags
@@ -120,7 +119,9 @@ def main():
     if replace_zero_nan:
         flag_attribute_names.append('flag_zero_and_nan')
 
-    raqc_obj.save_tiff(flag_attribute_names, include_arrays, include_masks)
+    resampling_percentiles = cfg['thresholding']['resampling_percentiles']
+    raqc_obj.save_tiff(flag_attribute_names, include_arrays, \
+                        resampling_percentiles)
 
     #backup config file
     config_backup_location = raqc_obj.file_path_out_backup_config

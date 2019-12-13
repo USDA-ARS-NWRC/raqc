@@ -634,7 +634,8 @@ class MultiArrayOverlap(object):
                 if v == 0:
                     buffer[k] = None
             self.buffer = buffer
-    def save_tiff(self, flag_attribute_names, include_arrays, include_masks):
+    def save_tiff(self, flag_attribute_names, include_arrays, \
+                    resampling_percentiles):
         """
         Saves up to two geotiffs using RasterIO basically.  One tiff will be the
         matrices of floats, and the second the masks and flags - booleans (uint8).
@@ -643,8 +644,6 @@ class MultiArrayOverlap(object):
         Args:
             flags: string. flags to include as bands in tif
             include_arrays: arrays (i.e. difference) to include as bands in tif
-            include_masks: arrays (i.e. overlap_nan) to include as bands in tif
-
         Outputs:
             file_path_out_tiff_flags:   single or multibanded array which may
                                         include any flag or mask
@@ -668,14 +667,6 @@ class MultiArrayOverlap(object):
         self.mat_clip1[self.mat_clip1 == -9999] = np.nan
         self.mat_clip2[self.mat_clip2 == -9999] = np.nan
         self.median_elevation[~self.mask_nan_snow_present] = np.nan
-
-        # invert mask >>  pixels with NO nans both dates to AT LEAST ONE nan
-        self.mask_overlap_nan = ~self.mask_overlap_nan
-
-        # append masks to flags list to save to tiff
-        if include_masks != None:
-            for mask in include_masks:
-                flag_attribute_names.append('mask_' + mask)
 
         # finally, change abbreviated attribute names to intuitive band names
         band_names = apply_dict(flag_attribute_names, self.keys_master, 'mat_object_to_tif')
@@ -739,7 +730,7 @@ class MultiArrayOverlap(object):
         # 5a) if images need rescaling to 50m
         # reference readme.md for details on 50m flag tif
         if not_50m:
-            self.rescale_to_50m()
+            self.rescale_to_50m(resampling_percentiles)
 
         # REPEAT steps 3) and 4) for saving arrays i.e. diff and diff_norm
 
@@ -792,7 +783,7 @@ class MultiArrayOverlap(object):
         log_message = 'save tiff = {} seconds'.format(round(tock - tick, 2))
         self.log.debug(log_message)
 
-    def rescale_to_50m(self):
+    def rescale_to_50m(self, resampling_percentiles):
         """
         Final step in resampling finer spatial resolution flags to 50m.
         Takes 50m flag.tif and saves multi-banded tif based off thresholds.
@@ -823,13 +814,13 @@ class MultiArrayOverlap(object):
             rio_obj = src
             meta = rio_obj.profile
             arr = rio_obj.read()[:]
-            # rio.obj_descriptions are from set_band_descriptions, they are
-            # hacky substitutes for variable names in netCDFs
+            # rio.obj.descriptions are from set_band_descriptions method of
+            # rasterio. They are hacky substitutes for variable names in netCDFs
+            # BUT can be viewed in QGIS and potentially other programs
             band_desc = list(rio_obj.descriptions)
-        pct_list = [0.1, 0.2, 0.3]
 
         # stack thresholded bands into multilayered np array (temp_stack)
-        for pct in pct_list:
+        for pct in resampling_percentiles:
             # sums all flags (elevation gain/loss, basin gain/loss, etc)
             # into one array with total number of flags at each pixel location
             temp_arr = np.sum((arr > pct) * 1, axis = 0)
@@ -842,22 +833,20 @@ class MultiArrayOverlap(object):
             else:
                 temp_stack = np.concatenate \
                     ((temp_stack, np.ndarray.astype(temp_arr, 'uint8')), axis = 0)
-        print('temp arr shape: ', temp_arr.shape)
 
         # create strings for band descriptions
-        pct_list = ['{}% thresh'.format(int(pct * 100)) for pct in pct_list]
-        # band_desc.extend(pct_list)
+        pct_str = ['{}% thresh'.format(int(pct * 100)) \
+                                    for pct in resampling_percentiles]
 
         # update metada
-        meta.update({'count':len(pct_list),
+        meta.update({'count':len(resampling_percentiles),
                     'dtype':'uint8',
                     'nodata':255})
 
-        print('temp stack shape ', temp_stack.shape)
         # write array to tif
         with rio.open(fp_thresh, 'w', **meta) as dst:
             for i in range(temp_stack.shape[0]):
-                dst.set_band_description(i + 1, '{}'.format(pct_list[i]))
+                dst.set_band_description(i + 1, '{}'.format(pct_str[i]))
             dst.write(temp_stack)
 
         # with rio.open(fp_percent, 'w', **meta) as dst:
@@ -1288,18 +1277,18 @@ class Flags(MultiArrayOverlap, PatternFilters):
         thresh_lower_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
         elevation_count = np.zeros(id_dem_unique.shape, dtype = np.int64)
         median_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
-        temp = mat_diff_norm_masked
-        temp2 = mat_diff_masked
-        temp3 = np.ones(temp2.shape, dtype = bool)
-        # save bin statistics per elevation bin to a numpy 1D Array i.e. list
+        temp = np.ones(temp2.shape, dtype = bool)
+        # save bin statistics per elevation band to a numpy 1D Array i.e. list
         for id, id_dem_unique2 in enumerate(id_dem_unique):
-            thresh_upper_raw[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[0])
-            thresh_upper_norm[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[1])
-            thresh_lower_raw[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[2])
-            thresh_lower_norm[id] = np.percentile(temp[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[3])
-            median_raw[id] = np.percentile(temp2[map_id_dem_overlap == id_dem_unique2], 50)
-            elevation_count[id] = getattr(temp3[map_id_dem_overlap == id_dem_unique2], 'sum')()
-            # elevation_std[id] = getattr(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], 'std')()
+            # for each elevation band of dem, find percentiles of snow depth
+            # i.e. at 1850-1900m find the 5th and 95th percentile of snow depth
+            # for both depth in m (raw) and normalized (norm)
+            thresh_upper_raw[id] = np.percentile(mat_diff_masked[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[0])
+            thresh_upper_norm[id] = np.percentile(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[1])
+            thresh_lower_raw[id] = np.percentile(mat_diff_masked[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[2])
+            thresh_lower_norm[id] = np.percentile(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[3])
+            median_raw[id] = np.percentile(mat_diff_masked[map_id_dem_overlap == id_dem_unique2], 50)
+            elevation_count[id] = getattr(temp[map_id_dem_overlap == id_dem_unique2], 'sum')()
 
         # Place threshold values onto map in appropriate elevation bin
         # Used to find elevation based outliers
@@ -1309,6 +1298,9 @@ class Flags(MultiArrayOverlap, PatternFilters):
         thresh_lower_raw_array = thresh_upper_norm_array.copy()
         thresh_median_raw_array = thresh_upper_norm_array.copy()
         for id, id_dem_unique2 in enumerate(id_dem_unique):
+            # id_bin = idx of locations on map matching elevation band
+            # thresh_upper_norm[id] grabs the upper normalized threshold for
+            # the particular elevation band
             id_bin = map_id_dem == id_dem_unique2
             try:
                 thresh_upper_norm_array[id_bin] = thresh_upper_norm[id]
