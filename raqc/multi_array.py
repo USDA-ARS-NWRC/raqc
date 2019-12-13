@@ -810,7 +810,7 @@ class MultiArrayOverlap(object):
         # Create file paths
         fp_temp_base = os.path.splitext(self.file_path_out_tif_flags)[-2]
         fp_temp = '{}_temp.tif'.format(fp_temp_base)
-        fp_out = '{}_50cm'.format(fp_temp_base)
+        fp_out = '{}_50cm.tif'.format(fp_temp_base)
 
         # resample from finer resolution to 50m
         cmd = 'gdalwarp -r average -overwrite -tr 50 50 {0} {1}' \
