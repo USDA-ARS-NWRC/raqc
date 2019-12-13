@@ -209,7 +209,7 @@ class MultiArrayOverlap(object):
                               (self.file_path_date2_te):
                 self.log.info(log_msg1)
 
-                # check for existence of clipped dem and veg from topo.nc
+                # check for existence of clipped dem and veg from topo.ncexi
                 if (os.path.isfile(self.file_path_dem_te) & \
                     os.path.isfile(self.file_path_veg_te)):
                     self.already_clipped = True
@@ -809,17 +809,17 @@ class MultiArrayOverlap(object):
 
         # Create file paths
         fp_temp_base = os.path.splitext(self.file_path_out_tif_flags)[-2]
-        fp_temp = '{}_temp.tif'.format(fp_temp_base)
-        fp_out = '{}_50cm.tif'.format(fp_temp_base)
+        fp_percent = '{}_resampled_percent.tif'.format(fp_temp_base)
+        fp_thresh = '{}_resampled_thresh_flags.tif'.format(fp_temp_base)
 
         # resample from finer resolution to 50m
         cmd = 'gdalwarp -r average -overwrite -tr 50 50 {0} {1}' \
-                .format(self.file_path_out_tif_flags, fp_temp)
+                .format(self.file_path_out_tif_flags, fp_percent)
         # run gdal command through shell
         run(cmd, shell = True)
 
         # Note flag is dtype float32 since it's a percentage
-        with rio.open(fp_temp) as src:
+        with rio.open(fp_percent) as src:
             rio_obj = src
             meta = rio_obj.profile
             arr = rio_obj.read()[:]
@@ -830,33 +830,40 @@ class MultiArrayOverlap(object):
 
         # stack thresholded bands into multilayered np array (temp_stack)
         for pct in pct_list:
+            # sums all flags (elevation gain/loss, basin gain/loss, etc)
+            # into one array with total number of flags at each pixel location
             temp_arr = np.sum((arr > pct) * 1, axis = 0)
+            # adds one more dimension to array to become (1,n,m) where n = rows
+            # and m = cols
             temp_arr = temp_arr[np.newaxis]
+            # stack each pct thresh band for each iter of loop
             if 'temp_stack' not in locals():
                 temp_stack = np.ndarray.astype(temp_arr, 'uint8')
             else:
                 temp_stack = np.concatenate \
                     ((temp_stack, np.ndarray.astype(temp_arr, 'uint8')), axis = 0)
+        print('temp arr shape: ', temp_arr.shape)
+
+        # create strings for band descriptions
+        pct_list = ['{}% thresh'.format(int(pct * 100)) for pct in pct_list]
+        # band_desc.extend(pct_list)
 
         # update metada
         meta.update({'count':len(pct_list),
                     'dtype':'uint8',
                     'nodata':255})
 
-        # create strings for band descriptions
-        pct_list = ['{}% thresh'.format(int(pct * 100)) for pct in pct_list]
-        band_desc.extend(pct_list)
-
+        print('temp stack shape ', temp_stack.shape)
         # write array to tif
-        with rio.open(fp_out, 'w', **meta) as dst:
+        with rio.open(fp_thresh, 'w', **meta) as dst:
             for i in range(temp_stack.shape[0]):
-                dst.set_band_description(i + 1, '{}% thresh'.format(band_desc[i]))
+                dst.set_band_description(i + 1, '{}'.format(pct_list[i]))
             dst.write(temp_stack)
 
-        with rio.open(fp_temp, 'w', **meta) as dst:
-            for i in range(temp_stack.shape[0]):
-                dst.set_band_description(i + 1, '{}% thresh'.format(band_desc[i]))
-            dst.write(temp_stack)
+        # with rio.open(fp_percent, 'w', **meta) as dst:
+        #     for i in range(temp_stack.shape[0]):
+        #         dst.set_band_description(i + 1, '{}'.format(band_desc[i]))
+        #     dst.write(temp_stack)
 
 
     def format_flag_names(self, flags, prepend):
