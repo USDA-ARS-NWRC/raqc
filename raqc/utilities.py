@@ -195,9 +195,15 @@ def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
         dem_mask:                   mask clipping dem for binning
         elevation_band_resolution:  resolution of bin increments i.e. 50m
     Returns:
-        map_id_dem:         dem array with bin ids in place of elevation
-        id_dem_unique:      list of unique dem ids
+        map_id_dem:         dem array with bin ids in place of elevation.
+                            shape = dem_mask.shape
         elevation_edges:    bin edges for elevation binning
+        id_dem_unique:      pretty unnecessary output as can be ascertained
+                            from elevation_edges.  These are indices of
+                            elevation bins
+                            shape = elevation range of masked DEM /
+                                            elevation_band_resolution
+
     """
     # use overlap_nan mask for snowline because we want to get average
     # snow per elevation band INCLUDING zero snow depth
@@ -227,12 +233,15 @@ def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
     map_id_dem = np.full(dem_mask.shape, id_dem_unique[-1] + 1, dtype=np.uint8)
     # places bin ids into map space (map_id_dem)
     map_id_dem[dem_mask] = id_dem
+    print(id_dem_unique)
+    print(elevation_edges)
+
     return map_id_dem, id_dem_unique, elevation_edges
 
 def check_DEM_resolution(dem_clip, elevation_band_resolution):
     """
     Brief method ensuring that DEM resolution from UserConfig can be partitioned
-    into uint8 datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
+    indem datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
     <= 255 elevation bands based on the elevation range of topo file.
 
     Args:
@@ -417,7 +426,7 @@ def snowline(dem, basin_mask, elevation_band_resolution, depth1, depth2, \
 
     return snowline_elev
 
-@profile
+# dem
 def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
                             file_path_base, band):
     """
@@ -510,10 +519,10 @@ def return_snow_files(file_path_snownc, year1, year2):
     file_path_snownc2 = os.path.join(file_path_snownc, \
                                         'run' + snownc_date2, 'snow.nc')
 
-    temp_snow1 = '/home/zachuhlmann/projects/data/SanJoaquin/20190614_20190704/run20190613_snow.nc'
-    temp_snow2 = '/home/zachuhlmann/projects/data/SanJoaquin/20190614_20190704/run20190703_snow.nc'
-
-    file_path_snownc1, file_path_snownc2 = temp_snow1, temp_snow2
+    # temp_snow1 = '/home/zachuhlmann/projects/data/SanJoaquin/20190614_20190704/run20190613_snow.nc'
+    # temp_snow2 = '/home/zachuhlmann/projects/data/SanJoaquin/20190614_20190704/run20190703_snow.nc'
+    #
+    # file_path_snownc1, file_path_snownc2 = temp_snow1, temp_snow2
 
     return file_path_snownc1, file_path_snownc2
 
@@ -556,6 +565,6 @@ def basic_plot(array, mask, cbar_string, suptitle_string, file_path_out):
     fig.suptitle(suptitle_string)
     plt.savefig(file_path_out, dpi = 180)
 
-@profile
+# @profile
 def debug_fctn():
     print('lets just see what the memory is')

@@ -108,7 +108,7 @@ class MultiArrayOverlap(object):
                 if response.lower() == 'proceed':
                     break
                 elif response.lower() == 'exit':
-                    os.sys.exit('\nexiting\n' + '-'*60)
+                    sys.exit('\nexiting\n' + '-'*60)
                 else:
                     print('\nresponse not recognized\n'
                     '\ntype    "proceed"   to proceed as is'
@@ -165,15 +165,11 @@ class MultiArrayOverlap(object):
                 '\n please ensure that both are either clipped or the original \n')
             sys.exit('program will exit for user to fix problem ---')
 
-        # ...continue making file paths
-        # creates file paths for clipped snow date and topo.nc-derived files
-        self.file_path_date1_te, self.file_path_date2_te = \
-            create_clipped_file_names(self.file_path_out_base,
-                                    file_path_dataset1, file_path_dataset2)
-
         # clipped (common_extent) topo derived files must also be in directory
         self.file_path_dem_te = self.file_name_base + '_dem_common_extent.tif'
         self.file_path_veg_te = self.file_name_base + '_veg_height_common_extent.tif'
+        self.file_path_date1_te = file_path_dataset1
+        self.file_path_date2_te = file_path_dataset2
 
         # check if clipped veg and dem files exist in base folder
         if self.already_clipped:
@@ -204,9 +200,14 @@ class MultiArrayOverlap(object):
         # User did not passed clipped files, but below code block automatically
         # detects the existence of clipped files based on file name
         if not self.already_clipped:
-            # check for existence of clipped snow files
-            if os.path.isfile(self.file_path_date1_te) & os.path.isfile \
-                              (self.file_path_date2_te):
+            # creates file paths for clipped snow date and topo.nc-derived files
+            # check for clipped snow files even if not passed in UserConfig
+            self.file_path_date1_te, self.file_path_date2_te = \
+                create_clipped_file_names(self.file_path_out_base,
+                                        file_path_dataset1, file_path_dataset2)
+
+            if os.path.isfile(file_path_date1_te) & os.path.isfile \
+                              (file_path_date2_te):
                 self.log.info(log_msg1)
 
                 # check for existence of clipped dem and veg from topo.ncexi
@@ -228,7 +229,7 @@ class MultiArrayOverlap(object):
             pass
 
         # These paths only needed for clip_extent_overlap, but setting here
-        # codeset more parsimonious
+        # makes codeset more parsimonious
         self.file_path_dataset1 = file_path_dataset1
         self.file_path_dataset2 = file_path_dataset2
         self.file_path_topo = file_path_topo
@@ -236,7 +237,7 @@ class MultiArrayOverlap(object):
     debug_fctn()
 
 
-    @profile
+    # @profile
     def clip_extent_overlap(self, remove_clipped_files):
         """
         finds overlapping extent of the input files (Geotiffs).  Adds clipped
@@ -350,7 +351,7 @@ class MultiArrayOverlap(object):
         run(run_arg3, shell = True)
         run(run_arg3b, shell = True)
 
-    @profile
+    # @profile
     def mask_basic(self):
         """
         Creates boolean masks and flags needed for multiple methods within RAQC, like
@@ -441,7 +442,7 @@ class MultiArrayOverlap(object):
 
         self.log.debug('Exited mask_advanced')
 
-    @profile
+    # @profile
     def make_diff_mat(self):
         """
         Saves as attribute a normalized difference matrix of the two input tiffs.
@@ -563,13 +564,15 @@ class MultiArrayOverlap(object):
                             format(date1, date2)
 
         # temp dates to pass into log message
-        temp_date1 = file_path_snownc1.split('/')[-1]
-        temp_date2 = file_path_snownc2.split('/')[-1]
+        temp_date1 = ''.join(file_path_snownc1.split('/')[-2])
+        temp_date2 = ''.join(file_path_snownc2.split('/')[-2])
 
         # turn True or False into string = 'gaining' or 'losing' for log message
         gain_loss = 'gaining' * gaining + 'losing' * (not gaining)
         log_message = '\nTotal basin_difference in depth ("thickness")'\
-                        '\ncalculated between {0} and {1} is {2}m.' \
+                        '\ncalculated between'\
+                        '\n<file_path_snownc>/{0}/snow.nc and '\
+                        '\n<file_path_snownc>/{1}/snow.nc is {2}m.' \
                         '\nThe average change in areas where depth changed, ' \
                         '\ni.e. where snow was present in either of the two dates,' \
                         '\nwas {3} m.' \
@@ -980,7 +983,7 @@ class MultiArrayOverlap(object):
 class PatternFilters():
     def init(self):
         pass
-    @profile
+    # @profile
     def mov_wind(self, name, size):
         """
          Moving window operation which adjusts window sizes to fit along
@@ -1048,7 +1051,7 @@ class PatternFilters():
         self.log.debug(log_message)
         return(pct)
 
-    @profile
+    # @profile
     def mov_wind2(self, name, size):
         """
         Orders and orders of magnitude faster moving window function than mov_wind().
@@ -1093,7 +1096,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         #                         file_path_topo, file_out_root, basin,
         #                         file_name_modifier, file_path_snownc)
 
-    @profile
+    # @profile
     def make_histogram(self, name, nbins, thresh, moving_window_size):
         """
         Creates 2D histogram and finds outliers.  Outlier detection is pretty crude
@@ -1154,7 +1157,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                         (round(tock - tick, 2))
         self.log.debug(log_message)
 
-    @profile
+    # @profile
     def flag_basin(self, apply_moving_window, moving_window_size, \
                             neighbor_threshold, snowline_threshold):
         """
@@ -1215,7 +1218,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                             self.elevation_band_resolution)
         self.log.info(log_msg1)
 
-    @profile
+    # @profile
     def flag_elevation(self, apply_moving_window, moving_window_size,
             neighbor_threshold, snowline_threshold, outlier_percentiles):
         """
@@ -1260,6 +1263,10 @@ class Flags(MultiArrayOverlap, PatternFilters):
         else:
             self.snowline_elev = snowline(snowline_threshold)
 
+        # Read docstring for this function for detailed info.
+        # In short: map_id_dem.shape = mask.shape or the shape of the clipped array
+        #                              it is an array that consists of indices
+        #                               corresponding to elevation bands
         map_id_dem, id_dem_unique, elevation_edges = \
             get_elevation_bins(self.dem_clip, mask, \
                                 self.elevation_band_resolution)
@@ -1267,22 +1274,23 @@ class Flags(MultiArrayOverlap, PatternFilters):
         map_id_dem_overlap = map_id_dem[mask]
 
         # Find threshold values per elevation band - 1D array
-        # Initiate numpy 1D arrays for these elevation bin statistics:
             # 1) upper, lower and median outlier thresholds for snow depth
             # 2) upper and lower outlier thresholds for normalized snow depth
             # 3) elevation_count = bins per elevation band
+        # Initiate numpy 1D arrays for these elevation bin statistics:
         thresh_upper_norm = np.zeros(id_dem_unique.shape, dtype = np.float16)
         thresh_lower_norm = np.zeros(id_dem_unique.shape, dtype = np.float16)
         thresh_upper_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
         thresh_lower_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
         elevation_count = np.zeros(id_dem_unique.shape, dtype = np.int64)
         median_raw = np.zeros(id_dem_unique.shape, dtype = np.int16)
-        temp = np.ones(temp2.shape, dtype = bool)
+        temp = np.ones(mat_diff_norm_masked.shape, dtype = bool)
         # save bin statistics per elevation band to a numpy 1D Array i.e. list
         for id, id_dem_unique2 in enumerate(id_dem_unique):
-            # for each elevation band of dem, find percentiles of snow depth
-            # i.e. at 1850-1900m find the 5th and 95th percentile of snow depth
-            # for both depth in m (raw) and normalized (norm)
+            # for each elevation band find outliers in snow depth distribution:
+            # ex) at 1850-1900m elev band, find 5th percentile (thresh_lower) and
+            # 95th (thresh_upper) of snow depth in m (raw) and normalized (norm)
+            # These arrays will be N X 1 where N = number of elevation bins
             thresh_upper_raw[id] = np.percentile(mat_diff_masked[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[0])
             thresh_upper_norm[id] = np.percentile(mat_diff_norm_masked[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[1])
             thresh_lower_raw[id] = np.percentile(mat_diff_masked[map_id_dem_overlap == id_dem_unique2], outlier_percentiles[2])

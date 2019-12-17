@@ -11,7 +11,11 @@ Usage
 -----
 Currently takes two time-sequential geoTIFFs (.tif) and outputs a multi-banded boolean image which flags suspect and potentially bad pixel locations diagnosing different issues, such as too much positive change, negative change or spatially clustered change. More flags increase the likelihood that pixels are problematic. Certain flag combinations can be used to diagnose the type of error in data acquisition, processing or modeling responsible for the suspect data.
 
-RAQC was designed to **determine the quality** of snow depth images from lidar point clouds, and to further identify pixels and chunks of pixels that were **processed incorrectly.**  Processing errors and workflow flaws which produced these issues with our lidar-derived raster images resulted primarilly from: **1)** nans were represented by -9999 and 0 interchangeably.  This was problematic as 0 means 0m snow depth in much of the image where data WAS NOT collected.  Additionally, vegetation such as forests can lead to major errors in ranging measurements from lidar, wherein the digital surface model erroneously classifed vegetation regurns (branches, trees, etc) as ground returns.  We attempted to flag suspect pixels and quantify the image as a whole as either "good" or "bad"
+RAQC was designed to **determine the quality** of snow depth images derived from lidar point clouds, and to further identify pixels and chunks of pixels that were **processed incorrectly.**  Processing errors and workflow flaws which produced these issues with our lidar-derived raster images resulted primarilly from: **1)** nans being represented by -9999 and 0 interchangeably between dates.  This was problematic as 0 means 0m snow depth in much of the image where data WAS NOT collected.  Additionally, vegetation such as forests can lead to major errors in ranging measurements from lidar, wherein the digital surface model erroneously classifed vegetation returns (branches, trees, etc) as ground returns.
+
+We attempted to flag suspect pixels in multiple categories and quantify the entire image as either "good" or "bad".  The user may have some discretion in setting thresholds and choosing flags which appear applicable for the particular pair of images.  This depends on the total relative number of pixels being flagged.
+
+Additional functionality was added for the first flight of the year.  In this case, modelled snow depth from AWSM runs could be used.
 
 * Free software: GNU General Public License v3
 
@@ -19,29 +23,25 @@ To Run:
 --------
 <i>RAQC utilizes a configuration file managed by inicheck (https://github.com/USDA-ARS-NWRC/inicheck).  User must set all parameters here and run throught the command line.</i>
 
-Here is a breakdown of the configuration file(UserConfig) sections and short examples...
+Here is a breakdown of the configuration file (UserConfig) sections and short examples...
 &nbsp;&nbsp;<i>Note: some options MAY have changed</i>
-### [difference_arrays]
-<i>Helps to visualize the 2D histogram when ```[options][interactive_plot] = y```</i>
-- Clips array from ```[name]``` based on items ```[action]```, ```[operator]``` and ```[value]```.
-- The default is ```date1``` depth < 1700cm and ```normalized difference``` < 20 or 2,000%.
--  **ex)** Below config options will create mask date1 depths > 1700 cm, normalized change > 20 or 2,000% and nans from 2D histogram and outliers:
 
-```[difference_arrays]
-name:                      date1, difference_normalized
-action:                    compare, compare
-operator:                  less_than, greater_than, less_than, greater_than
-value:                      1700, -1, 20, -1.1
-```
+Flags:
+--------
+There are multiple categories of flags.  The new lidar image (tif) is compared to the previous lidar image for the snow year.  If the lidar image is the first of the year then the previous day's modelled snow depth from ```snow.nc "thickness"``` can be used as a baseline.  From the change between these two images, change statistics are evaluated for potential outliers.  There are essentially two main statistical categories: ```elevation``` and ```basin```.  The names are vestigal to previous definitions, but in short ```basin``` is any pixel that went from 0 snow to some snow, or vice versa while ```elevation``` flags pixels that with extreme change (loss or gain) relative to their elevation band.  Furthermore, ```elevation``` pixels must have <b>both</b> an extreme snow depth change, and an extreme elative snow depth change.
 
-### [flags]
-<i>this section enables user to select which flags to include in analysis, whether to apply moving windows when applicable and how to define the construction of each flag.</i>
-- The ```[flags]``` section chooses flags to compute.  If ```basin_block```, ```elevation block``` or ```tree``` is selected, 'loss' and 'gain' flags will be created for each of ```basin```, ```elevation``` or ```tree``` respectively.
-&nbsp;&nbsp;**ex)** ```[flags][basin_blocks]``` will yield ```flag_basin_loss``` and ```flag_basin_gain```.
-- ```[elevation_loss]``` and ```[elevation_gain]``` sections specifify whether to use ```difference``` and/or ```difference_normalized```.  If both selected, then logic is for **and**
+ex) [make a table with nice example with elevation band]
+
+<i>In first iteration of RAQC there was a ```flags``` section which allowed user to CHOOSE which flags to include.  However, this was abandoned. Now all flags are included, with the exception of ```histogram``` which takes a long time to run and has not proven useful.  The section ```histogram_outliers``` will detail options</i>
+
+Useful information for reading the code.  This section describes how flags were made
+
+-'loss' and 'gain' flags will be created for each of ```basin``` and ```elevation```.
+- For runs with two lidar flights, ```basin_gain``` or ```basin_loss``` will be removed from ```flags``` depending on the calculated change in basin snow depth.  In most cases, ```basin_loss``` will be removed.  In most years the first flight is around peak SWE and the second flight is deeper into melt season, therefore a lot of the low and mid elevation has completed melted.  Therefore ```basin_loss``` will flag expected melt pixels erroneously.
+
+- ```[elevation_loss]``` and ```[elevation_gain]``` result from ```difference``` **and** ```difference_normalized```.
     - i.e. <i>find outliers</i> where **both** ```difference``` & ```difference_normalized``` exceed elevation band thresholds.
-- ```tree``` flag is composed of ```elevation_block``` and/or ```basin_block``` flags, but **only flagged if** <i>vegetation is also present</i> in pixel (<i>currently defined as vegetation_height > 5m from topo.nc</i>).
-- ```[tree_loss]``` and ```[tree_gain]``` are required items if ```[flags][tree]``` is specified.  The ```tree``` flag can combine or use ```elevation``` and ```basin``` flags individually or as compound conditions i.e. ```and``` or ```or```.  Options are ```elevation```, ```basin```, ```or``` or ```and```.
+- ```elevation``` flags are further constrained to pixels with <b>vegetation</b>. Vegetation is defined as vegetation_height > 5m from (topo.nc).
 
 ### [histogram_outliers]
 <i>sets parameters for 2D histogram-space outliers</i>
@@ -53,11 +53,22 @@ value:                      1700, -1, 20, -1.1
 ```
 [histogram_outliers]
 histogram_mats:                date1, difference_normalized         #x, y axis respectively
+action:                    compare, compare
+operator:                  less_than, greater_than, less_than, greater_than
+value:                      1700, -1, 20, -1.1
 num_bins:                      60,  200                             #x, y axis respectively
 threshold_histogram_space:     0.45, 1
 moving_window_name:            bins
 moving_window_size:             3
+plot:                         save
 ```
+<b>the first four options are mostly for visualization</b>
+<i> ```[histogram_outliers][plot]``` = ```save``` or ```show`` creates a plot of 2D histogram</i>
+- Clips array from ```[name]``` based on items ```[action]```, ```[operator]``` and ```[value]```.
+- The default is ```date1``` depth < 1700cm and ```normalized difference``` < 20 or 2,000%.
+-  **ex)** Above config options will create mask date1 depths > 1700 cm, normalized change > 20 or 2,000% and nans from 2D histogram plot and flags:
+
+
 ![image](https://raw.githubusercontent.com/USDA-ARS-NWRC/raqc/devel/docs/placeholder_histogram.png)
 
 ### [block_behavior]
