@@ -1193,24 +1193,36 @@ class Flags(MultiArrayOverlap, PatternFilters):
             self.elevation_band_resolution, self.mat_clip1, self.mat_clip2,
             snowline_threshold)
 
-        basin_loss = self.mask_overlap_nan & self.all_loss & (self.dem_clip > self.snowline_elev) #ensures neighbor threshold and overlap, plus from an all_loss cell
-        basin_gain = self.mask_overlap_nan & self.all_gain  #ensures neighbor threshold and overlap, plus from an all_gain cell
+        # Create flag_basin_gain or flag_basin_loss depending on if basin is
+        # gaining or losing overall.
+
+        # If/else statement creates initial boolean array for flag and strings
+        # to further refine flag and set to attributes depending on basin change.
+        if gaining:
+            # no nans either date (mask_overlap_nan)
+            # and where snow completely melted (all_loss)
+            # don't include loss below snowline
+            basin_flag = self.mask_overlap_nan & self.all_loss & \
+                                    (self.dem_clip > self.snowline_elev)
+            basin_string = 'loss'
+            attribute_string = 'all_loss'
+            flag_attribute_string = 'flag_basin_loss'
+        else:
+            # no nans either date (mask_overlap_nan)
+            # and where snow was begat from bare ground (all_gain)
+            basin_flag = self.mask_overlap_nan & self.all_gain
+            basin_string = 'gain'
+            attribute_string = 'all_gain'
+            flag_attribute_string = 'flag_basin_gain'
 
         if apply_moving_window:
-            pct = self.mov_wind2(basin_loss, moving_window_size)
-            self.flag_basin_loss = (pct > neighbor_threshold) & self.all_loss
-            pct = self.mov_wind2(basin_gain, moving_window_size)
-            self.flag_basin_gain = (pct > neighbor_threshold) & self.all_gain
+            # moving window removes stray and isolated flagged pixels
+            pct = self.mov_wind2(basin_flag, moving_window_size)
+            basin_flag = (pct > neighbor_threshold) & \
+                                    getattr(self, attribute_string)
         else:
-            self.flag_basin_loss = basin_loss
-            self.flag_basin_gain = basin_gain
-
-        # Open veg layer from topo.nc and identify pixels with veg present (veg_height > 5)
-        with rio.open(self.file_path_veg_te) as src:
-            topo_te = src
-            veg_height_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
-            self.veg_height_clip = veg_height_clip[0]
-            self.veg_present = self.veg_height_clip > 5
+            # set flag as attribute
+            setattr(self, flag_attribute_string, basin_flag)
 
         log_msg1 = '\nThe snowline was determined to be at {0}m.' \
                     '\nIt was defined as the first elevation band in the basin' \
@@ -1394,7 +1406,14 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
             # if True, only flag pixels where veg > 5m is present
             if elev_flag_only_veg:
-                temp_out_init = temp_out_init & self.veg_present
+                # Open veg layer from topo.nc and identify pixels with veg present (veg_height > 5)
+                with rio.open(self.file_path_veg_te) as src:
+                    topo_te = src
+                    veg_height_clip = topo_te.read()  #not sure why this pulls the dem when there are logs of
+                    veg_height_clip = veg_height_clip[0]
+                    veg_present = veg_height_clip > 5
+
+                temp_out_init = temp_out_init & veg_present
             setattr(self, flag_name, temp_out_init.copy())
 
         # 5) Create dataframe to save as CSV

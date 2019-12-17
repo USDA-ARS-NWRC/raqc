@@ -81,7 +81,8 @@ def main():
 
 
     raqc_obj.flag_basin(apply_moving_window, block_window_size,
-                            block_window_threshold, snowline_threshold)
+                            block_window_threshold, snowline_threshold,
+                            raqc_obj.gaining)
 
 
     outlier_percentiles = cfg['thresholding']['outlier_percentiles']
