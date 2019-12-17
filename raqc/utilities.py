@@ -197,12 +197,18 @@ def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
     Returns:
         map_id_dem:         dem array with bin ids in place of elevation.
                             shape = dem_mask.shape
-        elevation_edges:    bin edges for elevation binning
+        elevation_edges:    bin edges for elevation binning.  Think like a
+                            histogram with bin edges, but with elevation
+                            bounds i.e. 2150 - 2200m has edges 2150 and 2200
+                            SHAPE = elevation range of masked DEM
+                                   rounded to be divisible by
+                                    (elevation_band_resolution) /
+                                    elevation_band_resolution
+
         id_dem_unique:      pretty unnecessary output as can be ascertained
                             from elevation_edges.  These are indices of
+                            elevation bins from 0 to n -1 ; where n = # of
                             elevation bins
-                            shape = elevation range of masked DEM /
-                                            elevation_band_resolution
 
     """
     # use overlap_nan mask for snowline because we want to get average
@@ -233,8 +239,6 @@ def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
     map_id_dem = np.full(dem_mask.shape, id_dem_unique[-1] + 1, dtype=np.uint8)
     # places bin ids into map space (map_id_dem)
     map_id_dem[dem_mask] = id_dem
-    print(id_dem_unique)
-    print(elevation_edges)
 
     return map_id_dem, id_dem_unique, elevation_edges
 

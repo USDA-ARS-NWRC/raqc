@@ -573,7 +573,7 @@ class MultiArrayOverlap(object):
                         '\ncalculated between'\
                         '\n<file_path_snownc>/{0}/snow.nc and '\
                         '\n<file_path_snownc>/{1}/snow.nc is {2}m.' \
-                        '\nThe average change in areas where depth changed, ' \
+                        '\nThe average change in pixels where depth changed, ' \
                         '\ni.e. where snow was present in either of the two dates,' \
                         '\nwas {3} m.' \
                         '\nAs such the basin is considered to be "{4}.' \
@@ -1159,7 +1159,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
     # @profile
     def flag_basin(self, apply_moving_window, moving_window_size, \
-                            neighbor_threshold, snowline_threshold):
+                            neighbor_threshold, snowline_threshold,
+                            gaining):
         """
         Finds cells of complete melt or snow where none existed prior.
         Apply moving window to remove scattered and isolated cells, ineffect
@@ -1171,6 +1172,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
             moving_window_size:   size of moving window used to define blocks
             neighbor_threshold:   proportion of neighbors within moving window (including target cell) that have
             snowline_threshold:   mean depth of snow (cm) in elevation band used to determine snowline
+            gaining:              True if basin gaining snow, False otherwise
 
         Outputs:
             flag_basin_gain:      all_gain blocks
@@ -1220,7 +1222,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
     # @profile
     def flag_elevation(self, apply_moving_window, moving_window_size,
-            neighbor_threshold, snowline_threshold, outlier_percentiles):
+            neighbor_threshold, snowline_threshold, outlier_percentiles,
+            elev_flag_only_veg):
         """
         More potential for precision than flag_basin function.  Finds outliers
         in relation to their elevation bands for snow gain and loss and adds as attributed
@@ -1242,6 +1245,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                     Percentiles used to threshold each elevation band.  i.e. 95 in (95,80,10,10) is the raw gain upper,
                                     which means anything greater than the 95th percentile of raw snow gain in each elevatin band will
                                     be flagged as an outlier.
+            elev_flag_only_veg:   True means only pixels with veg_height > 5m will be flagged
 
         Output:
             flag_elevation_loss:  attribute
@@ -1249,6 +1253,8 @@ class Flags(MultiArrayOverlap, PatternFilters):
         """
         self.log.debug('entering flag_elevation')
         tick = time.clock()
+
+        # 1) Grab necessary matrices
 
         # Masking bare ground areas because zero change in snow depth will skew
         # distribution from which thresholds are based
@@ -1264,7 +1270,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
             self.snowline_elev = snowline(snowline_threshold)
 
         # Read docstring for this function for detailed info.
-        # In short: map_id_dem.shape = mask.shape or the shape of the clipped array
+        # In short: map_id_dem.shape = mask.shape, the shape of the clipped array.
         #                              it is an array that consists of indices
         #                               corresponding to elevation bands
         map_id_dem, id_dem_unique, elevation_edges = \
@@ -1273,10 +1279,11 @@ class Flags(MultiArrayOverlap, PatternFilters):
 
         map_id_dem_overlap = map_id_dem[mask]
 
+        # 2) Find elevation band thresholds
         # Find threshold values per elevation band - 1D array
-            # 1) upper, lower and median outlier thresholds for snow depth
-            # 2) upper and lower outlier thresholds for normalized snow depth
-            # 3) elevation_count = bins per elevation band
+            # a) upper, lower and median outlier thresholds for snow depth
+            # b) upper and lower outlier thresholds for normalized snow depth
+            # c) elevation_count = bins per elevation band
         # Initiate numpy 1D arrays for these elevation bin statistics:
         thresh_upper_norm = np.zeros(id_dem_unique.shape, dtype = np.float16)
         thresh_lower_norm = np.zeros(id_dem_unique.shape, dtype = np.float16)
@@ -1298,8 +1305,20 @@ class Flags(MultiArrayOverlap, PatternFilters):
             median_raw[id] = np.percentile(mat_diff_masked[map_id_dem_overlap == id_dem_unique2], 50)
             elevation_count[id] = getattr(temp[map_id_dem_overlap == id_dem_unique2], 'sum')()
 
+        # 3) Place elevatin bin indices on clipped map space
         # Place threshold values onto map in appropriate elevation bin
-        # Used to find elevation based outliers
+        # The result of this codeblock ending after try/except statement will
+        # be arrays corresponding to the DEM with identical values in pixels
+        # within the same elevation band.  For instance the thresh_upper_raw_array
+        # may have 2.1 for all pixels within the 2150 - 2200m elevation bins.
+        # These arrays will not be output or saved but used to find elevation
+        # based outliers like this:
+        # temp = mat_diff_norm > thresh_upper_norm_array
+        # temp2 = mat_diff > thresh_upper_raw_array
+        # flag_elevation_gain = temp & temp2
+        # Note that flag_elevation_gain and flag_elevation_loss are pixels
+        # where both raw snow depth and normalized depth are above or below
+        # for both gain and loss
         thresh_upper_norm_array = np.zeros(mask.shape, dtype=np.float16)
         thresh_lower_norm_array = thresh_upper_norm_array.copy()
         thresh_upper_raw_array = thresh_upper_norm_array.copy()
@@ -1308,7 +1327,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         for id, id_dem_unique2 in enumerate(id_dem_unique):
             # id_bin = idx of locations on map matching elevation band
             # thresh_upper_norm[id] grabs the upper normalized threshold for
-            # the particular elevation band
+            # the particular elevation band for instance
             id_bin = map_id_dem == id_dem_unique2
             try:
                 thresh_upper_norm_array[id_bin] = thresh_upper_norm[id]
@@ -1321,7 +1340,10 @@ class Flags(MultiArrayOverlap, PatternFilters):
         # save as attribute for plotting purposes
         self.median_elevation = thresh_median_raw_array
 
-        # Combine outliers from mat_diff, mat_diff_norm or both mats accoring to UserConfig
+        # 4) Find flags and set attributes.
+        #    Use thresh_<upper or lower>_<norm or raw>_array to find outliers
+        #    in map space and save flags as attributes
+
         # Dictionary to translate values from UserConfig
         keys_local = {'loss' : {'operator' : 'less',
                                 'flag' : 'flag_elevation_loss',
@@ -1335,22 +1357,27 @@ class Flags(MultiArrayOverlap, PatternFilters):
         basin_change = ['loss', 'gain']
         shape_temp = getattr(np, 'shape')(getattr(self, 'mat_diff'))
         diff_mats = [['mat_diff', 'mat_diff_norm'], ['mat_diff', 'mat_diff_norm']]
+        # Loop to set flag_elevation_LOSS and then flag_elevation_GAIN attributes
         for id, basin_change in enumerate(basin_change):
             # initiate ones array to be used for conditional and/or overlapping
             # of diff and diff_norm outliers
             temp_out_init = np.ones(shape = shape_temp, dtype = bool)
+            # loop through raw depth (mat_diff) and normalized (mat_diff_norm)
+            # temp_out_init = outliers raw AND outliers normalized
             for diff_mat_name in diff_mats[id]:
-                # this translates UserConfig name to name (string) used here:
-                # i.e. difference = mat_diff and vice/versa
+                # yields diff_mat or diff_mat_norm array
                 diff_mat = getattr(self, diff_mat_name)
-                elevation_thresh_array = keys_local[basin_change][diff_mat_name]  # yields thresh_..._array
-                # finds cells exceeding elevation band thresholds
+                 # yields thresh_..._array
+                elevation_thresh_array = keys_local[basin_change][diff_mat_name]
+                # finds pixels exceeding elevation band thresholds
                 temp_out = getattr(np, keys_local[basin_change]['operator'])(diff_mat, elevation_thresh_array) & temp_out_init
                 temp_out_init = temp_out.copy()
             # remove flags below 'snowline'
             temp_out_init[~self.mask_nan_snow_present] = False
 
             # MOVING WINDOW:
+            # If UserConfig specified moving window.  This will potentially
+            # remove spatially isolated outliers from flag
             # Finds pixels idenfied as outliers (temp_out_init) which have a
             # minimum number of neighbor outliers within moving window
             # Note: the '& temp_out_init' ensures that ONLY pixels originally
@@ -1359,30 +1386,33 @@ class Flags(MultiArrayOverlap, PatternFilters):
             if apply_moving_window:
                 pct = self.mov_wind2(temp_out_init, moving_window_size)
                 temp_out_init = (pct > neighbor_threshold) & temp_out_init
-                # flag_elevation_loss filter out flags below snowline
-                if flag_name == 'flag_elevation_loss':
-                    temp_out_init[self.dem_clip < self.snowline_elev] = False
-                setattr(self, flag_name, temp_out_init.copy())
-            # NO Moving Window:
-            else:
-                # flag_elevation_loss filter out flags below snowline
-                if flag_name == 'flag_elevation_loss':
-                    temp_out_init[self.dem_clip < self.snowline_elev] = False
-                setattr(self, flag_name, temp_out_init.copy())
 
+            # if flag_elevation_loss, filter out flags below snowline
+            if flag_name == 'flag_elevation_loss':
+                temp_out_init[self.dem_clip < self.snowline_elev] = False
+            # set flag_elevation_loss and gain arrays as attributes
+
+            # if True, only flag pixels where veg > 5m is present
+            if elev_flag_only_veg:
+                temp_out_init = temp_out_init & self.veg_present
+            setattr(self, flag_name, temp_out_init.copy())
+
+        # 5) Create dataframe to save as CSV
         # Save dataframe of elevation band satistics on thresholds
-        # Simply preparing the column names in a syntactically shittilly readable format:
+        # Simply preparing the column names:
         column_names = ['elevation', '{}% change (m)', '{}% change (norm)',
                         '{}% change (m)', '{}% change (norm)', '50% change (m)',
                          'elevation_count']
         column_names_temp = []
         ct = 0
         for names in column_names:
+            # if percentile (non-hardcoded), then format col name
             if '{}' in names:
                 names = names.format(str(outlier_percentiles[ct]))
                 ct += 1
             column_names_temp.append(names)
 
+        # arrange data in numpy 2D array for saving to dataframe
         temp = np.stack((elevation_edges[id_dem_unique], thresh_upper_raw.ravel(),
                         thresh_upper_norm.ravel(), thresh_lower_raw.ravel(),
                         thresh_lower_norm.ravel(), median_raw.ravel(),
@@ -1396,7 +1426,14 @@ class Flags(MultiArrayOverlap, PatternFilters):
         self.log.debug(log_msg1)
     def stats_report(self, flag_attribute_names):
         """
-        quick utility to print out table of stats to shell and save to log
+        Quick utility to print out table of stats to shell and save to log.
+        The meat of utility is reporting to user the potential change in snow
+        depth if flagged pixels are updated.  Potential change is estimated
+        based on self.thresh_median which is the median raw snow depth per
+        elevation band.
+
+        Args:
+            flag_attribute_names:      flag names i.e. flag_elevation_gain
         """
 
         map_id_dem, id_dem_unique, elevation_edges = \

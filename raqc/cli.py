@@ -85,9 +85,11 @@ def main():
 
 
     outlier_percentiles = cfg['thresholding']['outlier_percentiles']
+    elev_flag_only_veg = cfg['thresholding']['elev_flag_only_veg']
     raqc_obj.flag_elevation(apply_moving_window,
                             block_window_size, block_window_threshold,
-                            snowline_threshold, outlier_percentiles)
+                            snowline_threshold, outlier_percentiles,
+                            elev_flag_only_veg)
 
     file_out = cfg['paths']['file_path_out']
     include_arrays = cfg['options']['include_arrays']
