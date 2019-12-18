@@ -29,7 +29,7 @@ import coloredlogs
 
 class MultiArrayOverlap(object):
     def __init__(self, file_path_dataset1, file_path_dataset2, file_path_topo,
-                file_out_root, file_path_snownc, basin, file_name_modifier,
+                file_out_root, basin, file_name_modifier,
                 elevation_band_resolution):
     # def __init__(self):
         """
@@ -116,13 +116,13 @@ class MultiArrayOverlap(object):
                     pass
 
         # ...continue making file paths
-        self.file_path_snownc = file_path_snownc
         self.file_path_out_tif_flags = '{0}_{1}_flags.tif'.format(self.file_name_base, file_name_modifier)
         self.file_path_out_tif_arrays = '{0}_{1}_arrays.tif'.format(self.file_name_base, file_name_modifier)
         self.file_path_out_csv = '{0}_raqc.csv'.format(self.file_name_base)
         self.elevation_band_resolution = elevation_band_resolution
         self.file_path_out_json = '{0}_metadata.txt'.format(self.file_name_base)
         self.file_path_out_histogram = '{0}_{1}_2D_histogram.png'.format(self.file_name_base, file_name_modifier)
+        self.file_path_out_thresholds = '{0}_thresholds_plot.png'.format(self.file_name_base)
 
         # 3) LOGGING - set up logging
         self.log_level = 'debug'
@@ -133,7 +133,7 @@ class MultiArrayOverlap(object):
         fmt = "%(levelname)s: %(msg)s"
 
         # Always write log file to <output>/log.txt
-        log_file = self.file_name_base + '_log.txt'
+        log_file = '{}_{}_log.txt'.format(self.file_name_base, file_name_modifier)
         self.log = logging.getLogger(__name__)
 
         # Log to file, no screen output.
@@ -206,8 +206,8 @@ class MultiArrayOverlap(object):
                 create_clipped_file_names(self.file_path_out_base,
                                         file_path_dataset1, file_path_dataset2)
 
-            if os.path.isfile(file_path_date1_te) & os.path.isfile \
-                              (file_path_date2_te):
+            if os.path.isfile(self.file_path_date1_te) & os.path.isfile \
+                              (self.file_path_date2_te):
                 self.log.info(log_msg1)
 
                 # check for existence of clipped dem and veg from topo.ncexi
@@ -463,9 +463,10 @@ class MultiArrayOverlap(object):
             mat_clip1 = get16bit(mat_clip1)
             self.mat_clip1 = mat_clip1.copy()
         with rio.open(self.file_path_date2_te) as src:
-            self.d2_te = src
-            self.meta2_te = self.d2_te.profile
-            mat_clip2 = self.d2_te.read()  #matrix
+            d2_te = src
+            self.d2_te_bounds = d2_te.bounds
+            self.meta2_te = d2_te.profile
+            mat_clip2 = d2_te.read()  #matrix
             mat_clip2 = mat_clip2[0]
             # If NaN is represented as np.nan, change to -9999. Will be
             # returned to np.nan prior to saving tiff, once analysis is complete
@@ -492,7 +493,7 @@ class MultiArrayOverlap(object):
         self.mat_diff_norm = np.ndarray.astype(mat_diff_norm, np.float16)
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
 
-    def determine_basin_change(self, band):
+    def determine_basin_change(self, file_path_snownc, band):
         """
         First pass (nod to Mark for the term "First Pass" for example "I have a P I,
         here is my first pass at retaining my dignity - I'll shoot 17 consecutive
@@ -503,72 +504,104 @@ class MultiArrayOverlap(object):
             gaining:       True if basin gained snow.  False if basin lost snow.
                             this will be used later to shed a noisy flag
         """
-        # Zach check warning from log here WARNING %s in %s
-        file_path_snownc1, file_path_snownc2 = \
-                        return_snow_files(self.file_path_snownc, \
-                                        self.date1_string, self.date2_string)
+        if method_determine_gaining == 'snownc':
+            # Zach check warning from log here WARNING %s in %s
+            # return snow.nc file paths to difference for determining basin change
+            file_path_snownc1, file_path_snownc2 = \
+                            return_snow_files(file_path_snownc, \
+                                            self.date1_string, self.date2_string)
 
-        snownc1_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc1, band)
-        snownc2_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc2, band)
-        topo_file_open_rio = 'netcdf:{0}:{1}'.format(self.file_path_topo, 'mask')
+            # dates of snow.nc files used to determing basin change stats
+            temp_date1 = ''.join(file_path_snownc1.split('/')[-2])
+            temp_date2 = ''.join(file_path_snownc2.split('/')[-2])
 
-        date1 = file_path_snownc1.split('/')[-1][3:11]
-        date2 = file_path_snownc2.split('/')[-1][3:11]
-        file_path_out = os.path.join(self.file_name_base, \
-                    'RAQC_modelled_basin_diff_{}_to_{}.png'.format(date1, date2))
+            # If clipped, then RAQC has previously been run on this data and
+            # basin change stats have are saved to metadata.txt
+            if self.already_clipped:
+                # open metadata json and get basin change
+                with open(self.file_path_out_json, 'r') as json_file:
+                    meta_orig = json.load(json_file)
+                    basin_total_change = meta_orig['basin_total_change']
+                    basin_avg_change = meta_orig['basin_avg_change']
+                    gaining = meta_orig['gaining']
 
-        with rio.open(snownc1_file_open_rio) as src:
-            snownc1_obj = src
-            meta = snownc1_obj.profile
-            snownc1 = snownc1_obj.read()
+            # if this is first RAQC run, then determine basin change stats
+            else:
 
-        with rio.open(snownc2_file_open_rio) as src:
-            snownc2_obj = src
-            snownc2 = snownc2_obj.read()
+                snownc1_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc1, band)
+                snownc2_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc2, band)
+                topo_file_open_rio = 'netcdf:{0}:{1}'.format(self.file_path_topo, 'mask')
 
-        with rio.open(topo_file_open_rio) as src:
-            mask_obj = src
-            mask = mask_obj.read()
+                date1 = file_path_snownc1.split('/')[-1][3:11]
+                date2 = file_path_snownc2.split('/')[-1][3:11]
+                file_path_out = os.path.join(self.file_name_base, \
+                            'RAQC_modelled_basin_diff_{}_to_{}.png'.format(date1, date2))
 
-        # Get statistics on snow depth change
-        # snownc1 and snownc2 are now the arrays of specified band (thickness)
-        snownc1 = snownc1[0]
-        snownc2 = snownc2[0]
-        # basin mask array
-        mask = mask[0]
-        mask = np.ndarray.astype(mask, np.bool)
-        # only interested in pixels with snow on at least one day
-        both_zeros = (np.absolute(snownc1) ==0) & (np.absolute(snownc2) == 0)
-        zeros_and_mask = mask & ~both_zeros
-        # snow property change (thickness)
-        diff = snownc2 - snownc1
-        # only within mask where snow present
-        diff_clipped_to_mask = diff[zeros_and_mask]
+                with rio.open(snownc1_file_open_rio) as src:
+                    snownc1_obj = src
+                    meta = snownc1_obj.profile
+                    snownc1 = snownc1_obj.read()
 
-        rez = meta['transform'][0]
-        # basin-wide change
-        basin_total_change = np.sum(diff_clipped_to_mask) * (rez ** 2)
-        # number of cells - to get area, multply by cell size
-        total_pixels_in_mask = diff_clipped_to_mask.shape[0]
-        # avg change per pixel
-        basin_avg_change = round((basin_total_change / total_pixels_in_mask) / (rez ** 2), 2)
+                with rio.open(snownc2_file_open_rio) as src:
+                    snownc2_obj = src
+                    snownc2 = snownc2_obj.read()
 
-        # determine if basin-wide snow depth is gaining or losing
-        if basin_total_change > 0:
+                with rio.open(topo_file_open_rio) as src:
+                    mask_obj = src
+                    mask = mask_obj.read()
+
+                # Get statistics on snow depth change
+                # snownc1 and snownc2 are now the arrays of specified band (thickness)
+                snownc1 = snownc1[0]
+                snownc2 = snownc2[0]
+                # basin mask array
+                mask = mask[0]
+                mask = np.ndarray.astype(mask, np.bool)
+                # only interested in pixels with snow on at least one day
+                both_zeros = (np.absolute(snownc1) ==0) & (np.absolute(snownc2) == 0)
+                zeros_and_mask = mask & ~both_zeros
+                # snow property change (thickness)
+                diff = snownc2 - snownc1
+                # only within mask where snow present
+                diff_clipped_to_mask = diff[zeros_and_mask]
+
+                rez = meta['transform'][0]
+                # basin-wide change
+                basin_total_change = np.sum(diff_clipped_to_mask) * (rez ** 2)
+                # number of cells - to get area, multply by cell size
+                total_pixels_in_mask = diff_clipped_to_mask.shape[0]
+                # avg change per pixel
+                basin_avg_change = round((basin_total_change / total_pixels_in_mask) / (rez ** 2), 2)
+
+                # determine if basin-wide snow depth is gaining or losing
+                if basin_total_change > 0:
+                    gaining = True
+                else:
+                    gaining = False
+
+        elif method_determine_gaining == 'gain':
             gaining = True
-        else:
+        elif method_determine_gaining == 'loss':
             gaining = False
+        else:
 
-        cbar_string = '\u0394 thickness (m)'
-        suptitle_string = '\u0394 snow thickness (m): snow.nc run{}_to_{}'. \
-                            format(date1, date2)
 
-        # temp dates to pass into log message
-        temp_date1 = ''.join(file_path_snownc1.split('/')[-2])
-        temp_date2 = ''.join(file_path_snownc2.split('/')[-2])
+            # Add basin statistics to metadata so future RAQC
+            # runs don't require recalculating
+            # a) grab original metadata
+            with open(self.file_path_out_json) as meta_orig:
+                meta_orig = json.load(meta_orig)
+            # b) add basin statistics to dictionary
+            meta_orig.update({'gaining':gaining,
+                            'basin_total_change':basin_total_change,
+                            'basin_avg_change':basin_avg_change})
+            # c) write updated metadata to file
+            with open(self.file_path_out_json, 'w') as meta_plus_basin_data:
+                json.dump(meta_orig, meta_plus_basin_data)
 
         # turn True or False into string = 'gaining' or 'losing' for log message
         gain_loss = 'gaining' * gaining + 'losing' * (not gaining)
+        # Output summary statistics to log message
         log_message = '\nTotal basin_difference in depth ("thickness")'\
                         '\ncalculated between'\
                         '\n<file_path_snownc>/{0}/snow.nc and '\
@@ -576,7 +609,7 @@ class MultiArrayOverlap(object):
                         '\nThe average change in pixels where depth changed, ' \
                         '\ni.e. where snow was present in either of the two dates,' \
                         '\nwas {3} m.' \
-                        '\nAs such the basin is considered to be "{4}.' \
+                        '\nAs such the basin is classified as "{4}"".' \
                         '\nFlags will be determined accordingly\n'.format \
                         (temp_date1, temp_date2, str(int(round(basin_total_change, 0))), \
                         str(round(basin_avg_change,2)), gain_loss)
@@ -584,9 +617,6 @@ class MultiArrayOverlap(object):
 
         # gaining = False
         self.gaining = gaining
-
-        # # plot and save
-        # basic_plot(diff, zeros_and_mask, cbar_string, suptitle_string, file_path_out)
 
     def get_buffer(self):
         """
@@ -600,15 +630,14 @@ class MultiArrayOverlap(object):
 
 
         # get extents and resolution from json and determine if originally clipped
-        # Zach consider using spatialnc.get_topo for saving this data instead
-        self.derive_dataset('d2_te')
+        self.derive_dataset('d2_te_bounds')
         #If disjoint bounds  --> find num cols and rows to buffer with nans N S E W
         #   Note: self.extents_same comes from derive_dataset
         if not self.extents_same:
             # clipped bounds
             bounds_date2_te = [None] * 4
-            bounds_date2_te[0], bounds_date2_te[1] = self.d2_te.bounds.left, self.d2_te.bounds.bottom
-            bounds_date2_te[2], bounds_date2_te[3] = self.d2_te.bounds.right, self.d2_te.bounds.top
+            bounds_date2_te[0], bounds_date2_te[1] = self.d2_te_bounds.left, self.d2_te_bounds.bottom
+            bounds_date2_te[2], bounds_date2_te[3] = self.d2_te_bounds.right, self.d2_te_bounds.top
 
             rez = self.orig_extents_rez['resolution']
             bounds_date2 = [None] * 4
@@ -933,14 +962,13 @@ class MultiArrayOverlap(object):
         else:
             pass
 
-    def derive_dataset(self, dataset_clipped_name):
+    def derive_dataset(self, bounds_clipped_name):
         """
         Unpacks, formats original metadata from json file and returns
         Also determines self.extents_same
-        Zach consider outputting orig_extents_rez
 
         Inputs:
-            dataset_clipped_name:   rio object name
+            bounds_clipped_name:   rio object name
         Outputs (i.e. self.):
             orig_shape:         dimensions of original date2 input tif
             extents_same:       boolean - was original file clipped
@@ -960,21 +988,19 @@ class MultiArrayOverlap(object):
         bottom = top - meta_orig['height'] * rez
 
         # load clipped dataset
-        # Zach  do we really need to save self.d2_te or can we just save a text file?
-        meta_clip = getattr(self, dataset_clipped_name)
+        meta_clip = getattr(self, bounds_clipped_name)
 
         # determine if original extents were same
-        self.extents_same = (meta_clip.bounds.left == left) & \
-                            (meta_clip.bounds.right == right) & \
-                            (meta_clip.bounds.top == top) & \
-                            (meta_clip.bounds.bottom == bottom)
+        self.extents_same = (meta_clip.left == left) & \
+                            (meta_clip.right == right) & \
+                            (meta_clip.top == top) & \
+                            (meta_clip.bottom == bottom)
 
         # dictionary of extents of original file
         orig_extents_rez.update({'left' : left, 'right' : right, 'top' : top, \
                         'bottom' : bottom, 'resolution' : rez})
 
         # save size of original array as tuple to get shape
-        # Zach consider adding orig shape to json or as a spatialnc.get_topo_stats
         orig_shape = []
         orig_shape.extend([round((top - bottom)/rez), round((right - left)/rez)])
         self.orig_shape = tuple(orig_shape)
@@ -1506,3 +1532,53 @@ class Flags(MultiArrayOverlap, PatternFilters):
                         '\n\twere instead replaced with the median depth at its elevation band\n'
         log_msg1 = '\n{0}{1}'.format(table, table_footer)
         self.log.info(log_msg1)
+
+        # this creates a two panel plot: raw and normal change by elevation band'
+    def thresholds_plot(self):
+        hyps = pd.read_csv(self.file_path_out_csv)
+        col_names = hyps.columns.tolist()
+
+        total = sum(hyps.elevation_count)
+        hyps['elevation_count'] = hyps['elevation_count'].apply(lambda x: ((x/total) > 0.0001))
+        hyps.drop(hyps[~hyps.elevation_count].index, inplace = True)
+
+        elevation = hyps[col_names[0]]
+        upper = hyps[col_names[1]]
+        lower = hyps[col_names[3]]
+        upper_norm = hyps[col_names[2]]
+        lower_norm = hyps[col_names[4]]
+
+        fig, ax = plt.subplots(nrows = 2, ncols = 1, figsize = (8,10))
+
+        color = ['r', 'g', 'y', 'b']
+        labels = ['raw change(cm)', 'normalized change']
+        ax[0].set_xlabel('elevation (m)')
+        ax[0].set_ylabel(labels[0])
+        ax[0].plot(elevation, upper, 'r-o')
+        ax[0].plot(elevation, lower, 'k-o')
+        ax[0].tick_params(axis = 'y', labelcolor = 'k')
+        ax[0].fill_between(elevation, lower, upper, facecolor = 'b', alpha = 0.5)
+        range = max(upper) - min(lower)
+        ax[0].set_ylim(min(lower) - range * 0.2, \
+                        max(upper) + range * 0.2)
+        ax[0].legend(loc = 2)
+        ax[0].set_title('Snow Depth Change (cm) {}'.
+                            format(self.file_name_base.split('/')[-1]))
+
+        ax[1].set_ylabel(labels[1])
+        ax[0].set_xlabel('elevation (m)')
+        ax[1].plot(elevation, upper_norm, 'r-o')
+        # axe2.tick_params(axis = 'y', labelcolor = color[2])
+        ax[1].plot(elevation, lower_norm, 'k-o')
+        ax[1].tick_params(axis = 'x', labelcolor = 'k')
+        ax[1].fill_between(elevation, lower_norm, upper_norm, facecolor = 'b', alpha = 0.5)
+        range = max(upper_norm) - min(lower_norm)
+        ax[1].set_ylim(min(lower_norm) - range * 0.2, \
+                        max(upper_norm) + range * 0.2)
+        ax[1].legend(loc = 2)
+        ax[1].set_title('Normalized Snow Depth Change (cm) {0}'.
+                            format(self.file_name_base.split('/')[-1]))
+
+
+        fig.tight_layout()
+        plt.savefig(self.file_path_out_thresholds, dpi = 180)

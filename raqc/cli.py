@@ -18,7 +18,7 @@ def main():
         configFile = args.user_config
 
     mcfgFile = MasterConfig(modules = 'raqc')
-    ucfg = get_user_config(configFile, mcfg = mcfgFile, checking_later = False)
+    ucfg = get_user_config(configFile, mcfg = mcfgFile)
 
     #ensure no errors
     warnings, errors = check_config(ucfg)
@@ -30,20 +30,38 @@ def main():
 
     raqc_obj = multi_array.Flags(cfg['paths']['file_path_in_date1'],
                 cfg['paths']['file_path_in_date2'], cfg['paths']['file_path_topo'],
-                cfg['paths']['file_path_out'], cfg['paths']['file_path_snownc'],
+                cfg['paths']['file_path_out'],
                 cfg['paths']['basin'], cfg['paths']['file_name_modifier'],
                 cfg['thresholding']['elevation_band_resolution'])
 
     # if files passed are already clipped to each other, then no need to repeat
     if not raqc_obj.already_clipped:
-        remove_files = cfg['options']['remove_clipped_files']
+        remove_files = cfg['mandatory_options']['remove_clipped_files']
         raqc_obj.clip_extent_overlap(remove_files)
 
     raqc_obj.make_diff_mat()
 
     raqc_obj.mask_basic()
 
-    raqc_obj.determine_basin_change('thickness')
+    # Not fun late addition to RAQC.  Determine is basin is losing or gaining
+    # snow overall.  If losing then don't include losing flag and vice versa
+    # for gaining.  They are too noisy in those scenarios.
+
+    # If snownc path is
+    # provided, use that.  Otherwise user has specified gaining or losing
+    # based off of their own information or time of year
+
+    gaining_determination_method = cfg['mandatory_options']['method_determine_gaining']
+    gaining_determination_method = gaining_determination_method.lower()
+    fp_snownc = cfg['mandatory_options']['gaining_file_path_snownc']
+
+    if gaining_determination_method == 'snownc':
+        raqc_obj.determine_basin_change(fp_snownc, 'thickness')
+    # user manually
+    elif gaining_determination_method == 'manual_gain':
+            raqc_obj.gaining = True
+    elif gaining_determination_method == 'manual_loss':
+            raqc_obj.gaining = False
 
     # add histogram flag if desired for analysis
     flags = ['basin', 'elevation', 'zero_and_nan']
@@ -93,7 +111,7 @@ def main():
                             elev_flag_only_veg)
 
     file_out = cfg['paths']['file_path_out']
-    include_arrays = cfg['options']['include_arrays']
+    include_arrays = cfg['mandatory_options']['include_arrays']
 
     # Output statistics table to log
     # first remove unnecessary flags
@@ -116,6 +134,9 @@ def main():
         flag_attribute_names.remove('flag_basin_loss')
 
     raqc_obj.stats_report(flag_attribute_names)
+
+    if cfg['thresholding']['want_thresholds_plot']:
+        raqc_obj.thresholds_plot()
 
     # Almost done! Save flags and arrays to Tif
     # First add back the zero_and_nan flag
