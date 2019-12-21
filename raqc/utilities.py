@@ -13,94 +13,72 @@ import matplotlib.pyplot as plt
 from . import plotables as pltz
 from snowav.utils.MidpointNormalize import MidpointNormalize
 from memory_profiler import profile
+import basin_setup.basin_setup as bs
 
-def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo, band):
+def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo):
     """
     Puts coordinates of all files into exact same extent and spatial resolution
 
     Args:
-        file_path_dataset1:     file path to dataset of first date
-        file_path_dataset1:     file path to dataset of second date
+        file_path_dataset1:     file path to dataset of first date (tif or nc)
+        file_path_dataset2:     file path to dataset of second date
         file_path_topo:         file path to topo.nc file
-        band:                   string with band name to use in .nc file
     Returns
         topo_rez_same:      boolean indicating if the topo.nc file has same spatial
                             resolution as the datasets
         extents_same:       boolean indicating if the extents of datasets and topo
                             are the same
-        min_extents:        list with minimum overlapping extents of the 3 datasets
+        bounds:        list with minimum overlapping extents of the 3 datasets
     """
 
-    with rio.open(file_path_dataset1) as src:
-        d1 = src
-        meta = d1.profile
-    tock = time.clock()
-
-    with rio.open(file_path_dataset2) as src:
-        d2 = src
-        meta2 = d2.profile
-
-    #formats string to open topo.nc file with rio.open
-    topo_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_topo, band)
-    with rio.open(topo_file_open_rio) as src:
-        d3 = src
-        meta3 = d3.profile
+    d1_coords = bs.parse_extent(file_path_dataset1, cellsize_return = True)
+    d2_coords = bs.parse_extent(file_path_dataset2, cellsize_return = True)
+    d3_coords = bs.parse_extent(file_path_topo, cellsize_return = True)
 
     #grab basics
     # Note: This is the X Direction resolution.  We are assuming that X and Y
     # resolutions, when rounded are the same
-    rez = meta['transform'][0]  # spatial resolution
-    rez2 = meta2['transform'][0]
-    rez3 = meta3['transform'][0]
+    d1_extents = d1_coords[:4]
+    d2_extents = d2_coords[:4]
+    d3_extents = d3_coords[:4]
+    # spatial resolution
+    rez1 = d1_coords[4]
+    rez2 = d2_coords[4]
+    rez3 = d3_coords[4]
 
-    # Seemingly wierd but necessary and simple way to check if bounds
-    # of both dates AND topo are the same.
-    # Rio...disjoint_bounds ONLY ACCEPTS two args, hence the if statements
-    # to hack effectly add 3rd argument.
-    # result of rio...disjoint_bounds is True if different, False is same
-    extents_same = ~ rio.coords.disjoint_bounds(d2.bounds, d1.bounds)
-    if extents_same:
-        extents_same2 = rio.coords.disjoint_bounds(d1.bounds, d3.bounds)
-        extents_same = extents_same2 # True or False
-    else:
-        extents_same = extents_same  # False
+    # determine if extents of topo and datasets are same (they're probably not)
+    extents_same = True
+    for ext1, ext2, ext3 in zip(d1_extents, d2_extents, d3_extents):
+        extents_same = extents_same * (ext1 == ext2 == ext3)
 
     # check that date1 and date2 spatial resolutions are the same.
-    if round(rez) == round(rez2):  #hack way to check all three rez the same
+    if round(rez1) == round(rez2):  #hack way to check all date1 and date2 rez the same
         pass
     else:
-        sys.exit("check that spatial resolution of your two repeat array \
-        files are the same must fix and try again")
-    if round(rez) == round(rez3):
-        topo_rez_same = True
-    else:
-        topo_rez_same = False
+        sys.exit("The spatial resolutions of date1 and date2 snow files need to match \
+        Date1 is {0} and Date 2 is{1}. \
+        The resolutions must be the same \
+        If First Flight and using snow.nc file, use: \
+         'gdalwarp -tr <rez lidar tiff> <rez lidar tiff> -r <path/to/input> <path/to/output> \
+         to get matching spatial rez THEN pass as dataset1 and rerun RAQC".format(rez1, rez2))
 
-    # .nc have different standards for spatial metadata than geotiff,
-    # At least the metadata pulled from rasterio
-    d3_left = bounds_to_pix_coords(d3.bounds.left, rez3, 'left')
-    d3_bottom = bounds_to_pix_coords(d3.bounds.bottom, rez3, 'bottom')
-    d3_right = bounds_to_pix_coords(d3.bounds.right, rez3, 'right')
-    d3_top = bounds_to_pix_coords(d3.bounds.top, rez3, 'top')
-
+    topo_rez_same = round(rez1) == round(rez3)
 
     # grab bounds of common/overlapping extent of date1, date2 and topo.nc
     # and prepare function call for gdal to clip to extent and align
-    left_max_bound = max(d1.bounds.left, d2.bounds.left, d3_left)
-    bottom_max_bound = max(d1.bounds.bottom, d2.bounds.bottom, d3_bottom)
-    right_min_bound =  min(d1.bounds.right, d2.bounds.right, d3_right)
-    top_min_bound = min(d1.bounds.top, d2.bounds.top, d3_top)
+    bounds = []
+    bounds.append(max(d1_extents[0], d2_extents[0], d3_extents[0]))
+    bounds.append(max(d1_extents[1], d2_extents[1], d3_extents[1]))
+    bounds.append(min(d1_extents[2], d2_extents[2], d3_extents[2]))
+    bounds.append(min(d1_extents[3], d2_extents[3], d3_extents[3]))
 
     # ensure nothing after decimal - nice whole number, admittedly a float
-    left_max_bound = evenly_divisible_extents(left_max_bound, rez2)
-    bottom_max_bound = evenly_divisible_extents(bottom_max_bound, rez2)
-    right_min_bound = evenly_divisible_extents(right_min_bound, rez2)
-    top_min_bound = evenly_divisible_extents(top_min_bound, rez2)
+    bounds_even = []
+    for bound in bounds:
+        bounds_even.append(evenly_divisible_extents(bound, rez2))
 
-    min_extents = [left_max_bound, bottom_max_bound, right_min_bound, \
-                            top_min_bound]
-    rez = [rez, rez2, rez3]
-    return topo_rez_same, extents_same, min_extents, rez
+    rez = [rez1, rez2, rez3]
+    return topo_rez_same, extents_same, bounds_even, rez
 
 def evenly_divisible_extents(coord, rez):
     """
@@ -135,7 +113,7 @@ def evenly_divisible_extents(coord, rez):
 
 def bounds_to_pix_coords(bound, rez, location):
     """
-    Rectifies possible quarks using rasterio, namely that <dataset>.bounds
+    netCDF use pixel center not upper left. Also <dataset>.bounds object
     outputs exterior bounding box of dataset, NOT the pixel locations.
     May need more investigation, but works when matching netCDF to geotiff
     coordinates using Rasterio
@@ -151,12 +129,7 @@ def bounds_to_pix_coords(bound, rez, location):
 
     # dictionary converts key into string of 'out' or 'in' for shifting bounds
     # in or out
-    dict_offset_coords = {'left':'out', 'right':'in', 'bottom':'out', 'top':'in'}
-    location = dict_offset_coords[location]
-    if location == 'in':
-        bound_new = bound - rez / 2
-    if location == 'out':
-        bound_new = bound + rez / 2
+    bound_new = bound - rez / 2
     return(bound_new)
 
 def rasterio_netCDF(file_path):
@@ -253,7 +226,8 @@ def check_DEM_resolution(dem_clip, elevation_band_resolution):
         elevation_band_resolution:  resolution of bin increments i.e. 50m
     Returns
     """
-    min_elev, max_elev = np.min(dem_clip), np.max(dem_clip)
+    dem_clip[dem_clip==-9999] = np.nan
+    min_elev, max_elev = np.nanmin(dem_clip), np.nanmax(dem_clip)
     num_elev_bins = math.ceil((max_elev - min_elev) / elevation_band_resolution)
     min_elev_band_rez = math.ceil((max_elev - min_elev) / 254)
     if num_elev_bins > 254:
@@ -342,29 +316,59 @@ def create_clipped_file_names(file_path_out_base, file_path_dataset1,
         file_path_date1_te:     file path of date1 clipped file
         file_path_date2_te:     file path of date2 clipped file
     """
-    # Create file paths and names
-    file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
-                                (file_path_dataset1).split('/')[-1])[0]
-    #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
-    id_date_start = file_name_date1_te_temp.index('2')
-    # grab file name bits from both dates to join into descriptive name
-    file_name_date1_te_first = os.path.splitext \
-                                (file_name_date1_te_temp)[0][:id_date_start + 8]
-    file_name_date1_te_second = os.path.splitext \
-                                (file_name_date1_te_temp)[0][id_date_start:]
-    file_name_date2_te_temp = os.path.splitext(os.path.expanduser \
-                                (file_path_dataset2).split('/')[-1])[0]
-    file_name_date2_te_first = os.path.splitext \
-                                (file_name_date2_te_temp)[0][:id_date_start + 8]
-    file_name_date2_te_second = os.path.splitext \
-                                (file_name_date2_te_temp)[0][id_date_start:]
-    # ULTIMATELY what is used as file paths
-    file_path_date1_te = os.path.join(file_path_out_base, \
-                                        file_name_date1_te_first + '_clipped_to_' + \
-                                        file_name_date2_te_second + '.tif')
-    file_path_date2_te = os.path.join(file_path_out_base, \
-                                        file_name_date2_te_first + '_clipped_to_' +  \
-                                        file_name_date1_te_second + '.tif')
+    is_date1_nc = os.path.splitext(file_path_dataset1)[-1] == '.nc'
+
+    if not is_date1_nc:
+        # Create file paths and names
+        file_name_date1_te_temp = os.path.splitext(os.path.expanduser \
+                                    (file_path_dataset1).split('/')[-1])[0]
+        #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
+        id_date_start = file_name_date1_te_temp.index('2')
+        # grab file name bits from both dates to join into descriptive name
+        file_name_date1_te_first = os.path.splitext \
+                                    (file_name_date1_te_temp)[0][:id_date_start + 8]
+        file_name_date1_te_second = os.path.splitext \
+                                    (file_name_date1_te_temp)[0][id_date_start:]
+        file_name_date2_te_temp = os.path.splitext(os.path.expanduser \
+                                    (file_path_dataset2).split('/')[-1])[0]
+        file_name_date2_te_first = os.path.splitext \
+                                    (file_name_date2_te_temp)[0][:id_date_start + 8]
+        file_name_date2_te_second = os.path.splitext \
+                                    (file_name_date2_te_temp)[0][id_date_start:]
+        # ULTIMATELY what is used as file paths
+        file_path_date1_te = os.path.join(file_path_out_base, \
+                                            file_name_date1_te_first + '_clipped_to_' + \
+                                            file_name_date2_te_second + '.tif')
+        file_path_date2_te = os.path.join(file_path_out_base, \
+                                            file_name_date2_te_first + '_clipped_to_' +  \
+                                            file_name_date1_te_second + '.tif')
+
+    else:
+        date1 = os.path.splitext(file_path_dataset1)[0].split('/')[-2][3:]
+        print('date 1', date1)
+        # the file name without format extension (.nc)
+        file_name_date2_te_temp = os.path.splitext(os.path.expanduser \
+                                    (file_path_dataset2).split('/')[-1])[0]
+        #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
+        print('file_name_date2_temp ', file_name_date2_te_temp)
+        id_date_start = file_name_date2_te_temp.index('2')
+
+        basin_abbr = file_name_date2_te_temp[:id_date_start]
+        print('basin_abbr ', basin_abbr)
+        date2 = file_name_date2_te_temp[id_date_start:id_date_start+8]
+
+        print('date2 ', date2)
+        file_name_date2_te_second = file_name_date2_te_temp[id_date_start+8:]
+        # Now let's combine into names
+        print('file_name_date2_te_second ', file_name_date2_te_second)
+        file_path_date1_te = os.path.join(file_path_out_base,
+                                '{0}{1}_clipped_to_{2}{3}.tif'
+                                .format(basin_abbr, date1, date2,
+                                        file_name_date2_te_second))
+        file_path_date2_te = os.path.join(file_path_out_base,
+                                '{0}{1}_clipped_to_run{2}_snownc.tif'
+                                .format(basin_abbr, date2, date1))
+
 
     return(file_path_date1_te, file_path_date2_te)
 

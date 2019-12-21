@@ -55,13 +55,8 @@ def main():
     gaining_determination_method = gaining_determination_method.lower()
     fp_snownc = cfg['mandatory_options']['gaining_file_path_snownc']
 
-    if gaining_determination_method == 'snownc':
-        raqc_obj.determine_basin_change(fp_snownc, 'thickness')
-    # user manually
-    elif gaining_determination_method == 'manual_gain':
-            raqc_obj.gaining = True
-    elif gaining_determination_method == 'manual_loss':
-            raqc_obj.gaining = False
+    # pass gaining_determination_method into function.  If 
+    raqc_obj.determine_basin_change(fp_snownc, 'thickness', gaining_determination_method)
 
     # add histogram flag if desired for analysis
     flags = ['basin', 'elevation', 'zero_and_nan']
@@ -72,6 +67,7 @@ def main():
     # i.e. 'basin' becomes 'flag_basin' in this list and self.flag_basin
     # attribute in raqc_object (raqc_obj)
     flag_attribute_names = raqc_obj.format_flag_names(flags, True)
+    print(flag_attribute_names)
 
     # code block only executed if UserConfig specifies histogram flag
     if cfg['histogram_outliers']['include_hist_flag']:
@@ -127,7 +123,13 @@ def main():
         replace_zero_nan = False
         pass
 
+    # zero_and_nan is not helpful for comparing snownc to tif file
+    is_date1_nc = 'snownc' in raqc_obj.file_path_date2_te
+    if is_date1_nc:
+        replace_zero_nan = False
+
     # remove noisy flags based on total basin gain or loss determination
+
     if raqc_obj.gaining:
         flag_attribute_names.remove('flag_basin_gain')
     else:
@@ -142,6 +144,11 @@ def main():
     # First add back the zero_and_nan flag
     if replace_zero_nan:
         flag_attribute_names.append('flag_zero_and_nan')
+    else:
+        try:
+            flag_attribute_names.remove('flag_zero_and_nan')
+        except ValueError:
+            pass
 
     resampling_percentiles = cfg['thresholding']['resampling_percentiles']
     raqc_obj.save_tiff(flag_attribute_names, include_arrays, \
