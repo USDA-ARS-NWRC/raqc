@@ -51,8 +51,6 @@ class MultiArrayOverlap(object):
             basin:                          Tuolumne, SanJoaquin, etc.
             file_name_modifier:             Links backup_config to file
             elevation_band_resolution:      see .utilities get_elevation_bins
-            file_path_snow_nc:              file path containing snow.nc files
-                                            from model outputs
         """
         # 1) GET DATE STRINGS
         # Get date strings AND if lidar flight(.tif):
@@ -246,6 +244,8 @@ class MultiArrayOverlap(object):
 
         Arguments:
             remove_clipped_files:   UserConfig option to delete clipped file
+                                    at the end of RAQC run.  This option will
+                                    be executed in a different method.
         """
 
         # 1) A few tasks
@@ -362,10 +362,10 @@ class MultiArrayOverlap(object):
     # @profile
     def mask_basic(self):
         """
-        Creates boolean masks and flags needed for multiple methods within RAQC, like
-        'mask_overlap_nan', and adds as attributes.  Also creates nested dictionary
-        used throughout RAQC to translate verbose config file names from .ini
-        file into more parsimonious abbreviations used in code
+        Creates boolean masks and flags needed for multiple methods within RAQC
+        and adds as attributes.  Also creates nested dictionary
+        used throughout RAQC to translate verbose config file names from
+        UserConfig values into more parsimonious abbreviations used here
 
         Outputs (attributes):
             mask_overlap_nans:       mask - no nans present in any input matrices
@@ -390,7 +390,8 @@ class MultiArrayOverlap(object):
                                 'mat_diff' : 'difference',
                                 'median_elevation' : 'median_diff_elev'}
 
-        #COMBINE dictionaries into NESTED dictionary
+        # COMBINE dictionaries into NESTED dictionary which will be referenced
+        # throughout multiple methods and utilities within RAQC
         self.keys_master = {'operators' : operators,
                             'config_to_mat_object' : config_to_mat_object,
                             'mat_object_to_tif' : mat_object_to_tif}
@@ -401,17 +402,18 @@ class MultiArrayOverlap(object):
 
         self.mask_overlap_nan = ~((self.mat_clip1 == -9999) | (self.mat_clip2 == -9999))  # where overlap and no nans
 
-        # zero_and_nan flag
-        nan_to_zero = (self.mat_clip1 == -9999) & date2_zero   # m2_nans and m1_zeros
-        zero_to_nan = date1_zero & (self.mat_clip2 == -9999)                               # m2_zeros and m1_nans
+        # Create zero_and_nan flag
+        # a) m2_nans and m1_zeros
+        nan_to_zero = (self.mat_clip1 == -9999) & date2_zero
+        # b) m2_zeros and m1_nans
+        zero_to_nan = date1_zero & (self.mat_clip2 == -9999)
+        # pixels that went zero to nan or nan to zero
         self.flag_zero_and_nan = nan_to_zero | zero_to_nan
 
-        # mat_diff_norm_nans = self.mat_diff_norm.copy()
-        # mat_diff_norm_nans[~self.mask_overlap_nan] = np.nan
-        # self.mat_diff_norm_nans = mat_diff_norm_nans
-
-        snow_present_mask = ~(date1_zero & date2_zero)  #snow present on at least one date
-        self.mask_nan_snow_present = snow_present_mask & self.mask_overlap_nan  # combine nan-free mask with snow present mask
+        #snow present on at least one date
+        snow_present_mask = ~(date1_zero & date2_zero)
+        # combine nan-free mask with snow present mask
+        self.mask_nan_snow_present = snow_present_mask & self.mask_overlap_nan
 
         self.all_gain = date1_zero & (np.absolute(self.mat_clip2) > 0)
 
@@ -461,6 +463,7 @@ class MultiArrayOverlap(object):
             mat_diff:       matrix - date1 depth - date2 depth
             mat_diff_norm:  matrix - mat_diff / date1
         """
+        # User rasterio to read in tif as an object with array and metadata
         with rio.open(self.file_path_date1_te) as src:
             d1_te = src
             mat_clip1 = d1_te.read()  #matrix
@@ -496,11 +499,13 @@ class MultiArrayOverlap(object):
             elevation_band_rez = check_DEM_resolution(self.dem_clip,
                                                 self.elevation_band_resolution)
         self.elevation_band_resolution = elevation_band_rez
-        self.all_loss = (np.absolute(mat_clip1) > 0) & (np.absolute(mat_clip2) == 0)  #all loss minimal
-        mat_diff = mat_clip2 - mat_clip1  # raw difference
-        # self.self.all_loss = (np.absolute(self.mat_clip1).round(2) > 0.0) & (np.absolute(self.mat_clip2).round(2)==0.0)  #all loss minimal
-        mat_clip1[~self.all_loss & (mat_clip1 < 25)] = 25  # Set snow depths below 0.25m to 0.25m to avoid dividing by zero
-        mat_diff_norm = np.round((mat_diff / mat_clip1), 2)  #
+        self.all_loss = (np.absolute(mat_clip1) > 0) & (np.absolute(mat_clip2) == 0)
+        # raw difference
+        mat_diff = mat_clip2 - mat_clip1
+        # Set snow depths below 0.25m to 0.25m to avoid dividing by zero
+        mat_clip1[~self.all_loss & (mat_clip1 < 25)] = 25
+        mat_diff_norm = np.round((mat_diff / mat_clip1), 2)
+        # save memory with float16
         self.mat_diff_norm = np.ndarray.astype(mat_diff_norm, np.float16)
         self.mat_diff = np.ndarray.astype(mat_diff, np.float16)
 
@@ -525,6 +530,30 @@ class MultiArrayOverlap(object):
             gaining:       True if basin gained snow.  False if basin lost snow.
                             this will be used later to shed a noisy flag
         """
+        snownc_date1 = format_date(self.date1_string)
+        snownc_date2 = format_date(self.date1_string)
+
+
+        if snownc_date2-snownc_date1 <= datetime.timedelta(days = 1):
+            while True:
+                print('\ndates of snow files are one day or less apart'
+                '\nin this case it is recommended that both basin_gain'
+                '\nand basin_loss flags be determined, which requires'
+                '\ncfg[mandatory_options][method_determin_gaining]=neither.'
+                '\nWould you like to change that here and create both flags'
+                '\nor stick with your original UserConfig value of "{0}"?'
+                '\n\n-Type "yes" to change value or "no" to retain original value...:\n'
+                .format(gaining_determination_method))
+                response = input()
+                if response == response.lower() == 'yes':
+                    gaining_determination_method = 'neither'
+                    break
+                elif response == response.lower() == 'no':
+                    break
+                else:
+                    print('\nResponse not recognized, try again: \n')
+
+
         # if snownc then use snownc path to pull two snow nc files.
         # date1 is on date of last lidar update and date2 will be one
         # day prior to update
@@ -586,12 +615,10 @@ class MultiArrayOverlap(object):
 
             # determine if basin-wide snow depth is gaining or losing
             if basin_total_change > 0:
-                gaining = True
+                gaining = 'gaining'
             else:
-                gaining = False
+                gaining = 'losing'
 
-            # turn True or False into string = 'gaining' or 'losing' for log message
-            gain_loss = 'gaining' * gaining + 'losing' * (not gaining)
             # Output summary statistics to log message
             log_message = '\nTotal basin_difference in depth ("thickness")'\
                             '\ncalculated between'\
@@ -603,16 +630,22 @@ class MultiArrayOverlap(object):
                             '\nAs such the basin is classified as "{4}"".' \
                             '\nFlags will be determined accordingly\n'.format \
                             (temp_date1, temp_date2, str(int(round(basin_total_change, 0))), \
-                            str(round(basin_avg_change,2)), gain_loss)
+                            str(round(basin_avg_change,2)), gaining)
 
         # if gaining_determination method other than 'snownc'
         # In the case of 'read_meta' we extract from infor frommetadata
         # dictinionary from previous 'snownc' gaining_determination_method
         # With manual_<gain or loss> we assign basin change as user prescribes
         # or
-        else:
+        elif gaining_determination_method == 'neither':
+            gaining = 'neither'
             # If clipped, then RAQC has previously been run on this data and
             # basin change stats have are saved to metadata.txt
+            log_message = '\nGaining or losing was not determined due to UserConfg'\
+                            '\nvalues or because dates were too close together'\
+                            '\nTherefore both basin_gain and basin_loss flags'\
+                            '\nwill be created'
+        else:
             if gaining_determination_method == 'read_meta':
                 # open metadata json and get basin change
                 with open(self.file_path_out_json, 'r') as json_file:
@@ -622,11 +655,11 @@ class MultiArrayOverlap(object):
                     gaining = meta_orig['gaining']
             else:
                 if gaining_determination_method == 'manual_gain':
-                    gaining = True
+                    gaining = 'gaining'
                     basin_total_change = ' <NA because gain entered manually>'
                     basin_avg_change = ' <NA because gain entered manually>'
                 elif gaining_determination_method == 'manual_loss':
-                    gaining = False
+                    gaining = 'losing'
                     basin_total_change = ' <NA because loss entered manually>'
                     basin_avg_change = ' <NA because loss entered manually>'
 
@@ -651,8 +684,6 @@ class MultiArrayOverlap(object):
                     with open(self.file_path_out_json, 'w') as meta_plus_basin_data:
                         json.dump(meta_orig, meta_plus_basin_data)
 
-            # turn True or False into string = 'gaining' or 'losing' for log message
-            gain_loss = 'gaining' * gaining + 'losing' * (not gaining)
             log_message = '\nTotal basin_difference in depth ("thickness")'\
                             '\ncalculated between the two dates'\
                             '\nis {0}m.' \
@@ -661,12 +692,13 @@ class MultiArrayOverlap(object):
                             '\nwas {1} m.' \
                             '\nAs such the basin is classified as "{2}"".' \
                             '\nFlags will be determined accordingly\n'.format \
-                            (basin_total_change, basin_avg_change, gain_loss)
+                            (basin_total_change, basin_avg_change, gaining)
 
         self.log.info(log_message)
 
         # gaining = False
         self.gaining = gaining
+        self.gaining_determination_method = gaining_determination_method
 
     def get_buffer(self):
         """
@@ -675,7 +707,8 @@ class MultiArrayOverlap(object):
 
         Outputs:
             buffer:     dictionary with buffer values left, right, bottom, top
-                        in index positions not UTMs
+                        in index positions (not UTMs) to restore shape of
+                        original lidar tif
         """
 
 
@@ -1018,18 +1051,18 @@ class MultiArrayOverlap(object):
         Also determines self.extents_same
 
         Inputs:
-            bounds_clipped_name:   rio object name
+            bounds_clipped_name:   name of bounds from rasterio object
         Outputs (i.e. self.):
             orig_shape:         dimensions of original date2 input tif
             extents_same:       boolean - was original file clipped
-        Returns:
             orig_extents_rez:   extents and resolution of orig date2 input tif
         """
 
-        orig_extents_rez = {}
+        # metadata from original snow tif
         with open(self.file_path_out_json) as json_file:
             meta_orig = json.load(json_file)
 
+        # use upper left coords, rez and raster dims to get extents
         temp_affine = meta_orig['transform'][:6]
         rez = temp_affine[0]
         left = temp_affine[2]
@@ -1038,15 +1071,16 @@ class MultiArrayOverlap(object):
         bottom = top - meta_orig['height'] * rez
 
         # load clipped dataset
-        meta_clip = getattr(self, bounds_clipped_name)
+        clipped_bounds = getattr(self, bounds_clipped_name)
 
         # determine if original extents were same
-        self.extents_same = (meta_clip.left == left) & \
-                            (meta_clip.right == right) & \
-                            (meta_clip.top == top) & \
-                            (meta_clip.bottom == bottom)
+        self.extents_same = (clipped_bounds.left == left) & \
+                            (clipped_bounds.right == right) & \
+                            (clipped_bounds.top == top) & \
+                            (clipped_bounds.bottom == bottom)
 
         # dictionary of extents of original file
+        orig_extents_rez = {}
         orig_extents_rez.update({'left' : left, 'right' : right, 'top' : top, \
                         'bottom' : bottom, 'resolution' : rez})
 
@@ -1254,9 +1288,6 @@ class Flags(MultiArrayOverlap, PatternFilters):
         Outputs:
             flag_basin_gain:      all_gain blocks
             flag_basin_loss:      all_loss_blocks
-            veg_present:          from topo.nc vegetation band.
-                                    where veg height > 5m
-
         """
         # Note below ensures -0.0 and 0 and 0.0 are all discovered and flagged as zeros.
         # Checked variations of '==0.0' and found that could have more decimals or be ==0 with same resultant boolean
@@ -1271,11 +1302,12 @@ class Flags(MultiArrayOverlap, PatternFilters):
             snowline_threshold)
 
         # Create flag_basin_gain or flag_basin_loss depending on if basin is
-        # gaining or losing overall.
+        # gaining or losing overall. In case where dates were too close together
+        # or cfg['mandatory_options']['method_determin_gaining']='neither'
+        # then BOTH flags will be created
 
-        # If/else statement creates initial boolean array for flag and strings
-        # to further refine flag and set to attributes depending on basin change.
-        if gaining:
+        # make bain_gain, basin_loss or both flags (neither)
+        if gaining in ['gaining', 'neither']:
             # no nans either date (mask_overlap_nan)
             # and where snow completely melted (all_loss)
             # don't include loss below snowline
@@ -1284,7 +1316,16 @@ class Flags(MultiArrayOverlap, PatternFilters):
             basin_string = 'loss'
             attribute_string = 'all_loss'
             flag_attribute_string = 'flag_basin_loss'
-        else:
+
+            if apply_moving_window:
+                # moving window removes stray and isolated flagged pixels
+                pct = self.mov_wind2(basin_flag, moving_window_size)
+                basin_flag = (pct > neighbor_threshold) & \
+                                        getattr(self, attribute_string)
+            # set flag as attribute
+            setattr(self, flag_attribute_string, basin_flag)
+
+        if gaining in ['losing', 'neither']:
             # no nans either date (mask_overlap_nan)
             # and where snow was begat from bare ground (all_gain)
             basin_flag = self.mask_overlap_nan & self.all_gain
@@ -1292,15 +1333,14 @@ class Flags(MultiArrayOverlap, PatternFilters):
             attribute_string = 'all_gain'
             flag_attribute_string = 'flag_basin_gain'
 
-        if apply_moving_window:
-            # moving window removes stray and isolated flagged pixels
-            pct = self.mov_wind2(basin_flag, moving_window_size)
-            basin_flag = (pct > neighbor_threshold) & \
-                                    getattr(self, attribute_string)
-        else:
-            pass
-        # set flag as attribute
-        setattr(self, flag_attribute_string, basin_flag)
+            if apply_moving_window:
+                # moving window removes stray and isolated flagged pixels
+                pct = self.mov_wind2(basin_flag, moving_window_size)
+                basin_flag = (pct > neighbor_threshold) & \
+                                        getattr(self, attribute_string)
+            # set flag as attribute
+            setattr(self, flag_attribute_string, basin_flag)
+
 
         log_msg1 = '\nThe snowline was determined to be at {0}m.' \
                     '\nIt was defined as the first elevation band in the basin' \

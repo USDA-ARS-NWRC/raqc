@@ -17,7 +17,11 @@ import basin_setup.basin_setup as bs
 
 def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo):
     """
-    Puts coordinates of all files into exact same extent and spatial resolution
+    Puts coordinates of all files into exact same extent and spatial resolution.
+    Also passes extents to evenly_divisible_extents method which rounds extents
+    to being evenly divisible by spatial rez i.e. if spatial rez = 50 then extents
+    must be multiples of 50, so 300025m would not be acceptable and would be
+    rounded to 300050m.
 
     Args:
         file_path_dataset1:     file path to dataset of first date (tif or nc)
@@ -28,7 +32,8 @@ def prep_coords(file_path_dataset1, file_path_dataset2, file_path_topo):
                             resolution as the datasets
         extents_same:       boolean indicating if the extents of datasets and topo
                             are the same
-        bounds:        list with minimum overlapping extents of the 3 datasets
+        bounds_even:        list with minimum overlapping extents of the 3 datasets
+        rez:            list of the three spatial resolutions of the 3 datasets
     """
 
     d1_coords = bs.parse_extent(file_path_dataset1, cellsize_return = True)
@@ -110,27 +115,6 @@ def evenly_divisible_extents(coord, rez):
     else:
         coord_updated = coord
     return(coord_updated)
-
-def bounds_to_pix_coords(bound, rez, location):
-    """
-    netCDF use pixel center not upper left. Also <dataset>.bounds object
-    outputs exterior bounding box of dataset, NOT the pixel locations.
-    May need more investigation, but works when matching netCDF to geotiff
-    coordinates using Rasterio
-
-    Args:
-        bound:      bounding box extents from rasterio dataset of .nc file
-        rez:        spatial resolution
-        location:   left, right, top, or bottom bounding coordinates
-
-    Returns:
-        bound_new:  correct pixel coordinates for bounds
-    """
-
-    # dictionary converts key into string of 'out' or 'in' for shifting bounds
-    # in or out
-    bound_new = bound - rez / 2
-    return(bound_new)
 
 def rasterio_netCDF(file_path):
     """
@@ -217,14 +201,18 @@ def get_elevation_bins(dem, dem_mask, elevation_band_resolution):
 
 def check_DEM_resolution(dem_clip, elevation_band_resolution):
     """
-    Brief method ensuring that DEM resolution from UserConfig can be partitioned
-    indem datatype - i.e. that the elevation_band_resolution (i.e. 50m) yields
+    Brief method ensuring that DEM resolution from UserConfig is not so fine that
+    range of DEM is partitioned into more bands than UINT8 datatype can classify
+    - i.e. that the elevation_band_resolution (50m, 20m, etc.) yields
     <= 255 elevation bands based on the elevation range of topo file.
 
     Args:
         dem_clip:                   just a dem that may or may not be clipped
         elevation_band_resolution:  resolution of bin increments i.e. 50m
     Returns
+        elevation_band_resolution:  returns elevation band resolution which
+                                    may have changed by user to comply with
+                                    maximum resolution of UINT8 - 254 elev bands
     """
     dem_clip[dem_clip==-9999] = np.nan
     min_elev, max_elev = np.nanmin(dem_clip), np.nanmax(dem_clip)
@@ -307,6 +295,7 @@ def create_clipped_file_names(file_path_out_base, file_path_dataset1,
     """
     Create file names for clipped snow depth files.
     Note: these are just the file names, files are not yet created
+    The 'te' refers to gdal flag 'te' or 'target extent'
 
     Args:
         file_path_out_base:     base path from which to join clipped files
@@ -434,89 +423,12 @@ def snowline(dem, basin_mask, elevation_band_resolution, depth1, depth2, \
 
     return snowline_elev
 
-# dem
-def determine_basin_change(file_path_snownc1, file_path_snownc2, file_path_topo,
-                            file_path_base, band):
-    """
-    First pass (nod to Mark for the term "First Pass" for example "I have a P I,
-    here is my first pass at retaining my dignity - I'll shoot 17 consecutive
-    shots 2.5 ft from basket until I win") at determining if basin lost or
-    gained snow.  This short protocol takes two snow.nc files
-    Args:
-        snownc1:    array from model run of date 1
-        snownc2:    array from model run one day prior to date 2.  This assures
-                    the lidar update is not included
-        file_path_topo:     grab mask layer from this file
-        file_path_base:     just for object naming purposes
-        band:               Could theoretically select a band other than 'thickness'
-    Returns:
-        gaining:       True if basin gained snow.  False if basin lost snow.
-                        this will be used later to shed a noisy flag
-        basin_total_change:  total change within basin mask (from topo.nc) and
-                            where snow was present on at least one date
-        basin_avg_change:    same as total change, but average
-    """
-    import sys
-
-    snownc1_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc1, band)
-    snownc2_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_snownc2, band)
-    topo_file_open_rio = 'netcdf:{0}:{1}'.format(file_path_topo, 'mask')
-
-    date1 = file_path_snownc1.split('/')[-1][3:11]
-    date2 = file_path_snownc2.split('/')[-1][3:11]
-    file_path_out = os.path.join(file_path_base, \
-                'RAQC_modelled_basin_diff_{}_to_{}.png'.format(date1, date2))
-
-    with rio.open(snownc1_file_open_rio) as src:
-        snownc1_obj = src
-        snownc1 = snownc1_obj.read()
-
-    with rio.open(snownc2_file_open_rio) as src:
-        snownc2_obj = src
-        snownc2 = snownc2_obj.read()
-
-    with rio.open(topo_file_open_rio) as src:
-        mask_obj = src
-        mask = mask_obj.read()
-
-    # Get statistics on snow depth change
-    # snownc1 and snownc2 are now the arrays of specified band (thickness)
-    snownc1 = snownc1[0]
-    snownc2 = snownc2[0]
-    # basin mask array
-    mask = mask[0]
-    mask = np.ndarray.astype(mask, np.bool)
-    # only interested in pixels with snow on at least one day
-    both_zeros = (np.absolute(snownc1) ==0) & (np.absolute(snownc2) == 0)
-    zeros_and_mask = mask & ~both_zeros
-    # snow property change (thickness)
-    diff = snownc2 - snownc1
-    # only within mask where snow present
-    diff_clipped_to_mask = diff[zeros_and_mask]
-
-    basin_total_change = np.sum(diff_clipped_to_mask)
-    basin_area = diff_clipped_to_mask.shape[0]
-    basin_avg_change = round(basin_total_change / basin_area, 2)
-
-    # determine if basin-wide snow depth is gaining or losing
-    if basin_total_change > 0:
-        gaining = True
-    else:
-        gaining = False
-
-    cbar_string = '\u0394 thickness (m)'
-    suptitle_string = '\u0394 snow thickness (m): snow.nc run{}_to_{}'. \
-                        format(date1, date2)
-
-    # # plot and save
-    # basic_plot(diff, zeros_and_mask, cbar_string, suptitle_string, file_path_out)
-
-    return gaining, basin_total_change, basin_avg_change
-
 def return_snow_files(file_path_snownc, year1, year2):
+    '''
+    short utility to create file paths for snow nc file
+    '''
     # Snow.nc file paths
     # Grab modelled snow depth one day prior to both lidar updates
-    # Returns boolean True if gaining snow, and the net change
     snownc_date2 = format_date(year2)
     snownc_date2 -= datetime.timedelta(days = 1)
     snownc_date2 = snownc_date2.strftime("%Y%m%d")
@@ -526,11 +438,6 @@ def return_snow_files(file_path_snownc, year1, year2):
                                         'run' + year1, 'snow.nc')
     file_path_snownc2 = os.path.join(file_path_snownc, \
                                         'run' + snownc_date2, 'snow.nc')
-
-    # temp_snow1 = '/home/zachuhlmann/projects/data/SanJoaquin/20190614_20190704/run20190613_snow.nc'
-    # temp_snow2 = '/home/zachuhlmann/projects/data/SanJoaquin/20190614_20190704/run20190703_snow.nc'
-    #
-    # file_path_snownc1, file_path_snownc2 = temp_snow1, temp_snow2
 
     return file_path_snownc1, file_path_snownc2
 

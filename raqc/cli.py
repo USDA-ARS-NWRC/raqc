@@ -47,16 +47,14 @@ def main():
     # snow overall.  If losing then don't include losing flag and vice versa
     # for gaining.  They are too noisy in those scenarios.
 
-    # If snownc path is
-    # provided, use that.  Otherwise user has specified gaining or losing
-    # based off of their own information or time of year
-
     gaining_determination_method = cfg['mandatory_options']['method_determine_gaining']
     gaining_determination_method = gaining_determination_method.lower()
     fp_snownc = cfg['mandatory_options']['gaining_file_path_snownc']
 
-    # pass gaining_determination_method into function.  If 
+    # pass gaining_determination_method into function.
     raqc_obj.determine_basin_change(fp_snownc, 'thickness', gaining_determination_method)
+    # if user changed method in prompt in determine_basin_change
+    cfg['mandatory_options']['method_determine_gaining'] = raqc_obj.gaining_determination_method
 
     # add histogram flag if desired for analysis
     flags = ['basin', 'elevation', 'zero_and_nan']
@@ -67,7 +65,6 @@ def main():
     # i.e. 'basin' becomes 'flag_basin' in this list and self.flag_basin
     # attribute in raqc_object (raqc_obj)
     flag_attribute_names = raqc_obj.format_flag_names(flags, True)
-    print(flag_attribute_names)
 
     # code block only executed if UserConfig specifies histogram flag
     if cfg['histogram_outliers']['include_hist_flag']:
@@ -130,9 +127,9 @@ def main():
 
     # remove noisy flags based on total basin gain or loss determination
 
-    if raqc_obj.gaining:
+    if raqc_obj.gaining=='gaining':
         flag_attribute_names.remove('flag_basin_gain')
-    else:
+    elif raqc_obj.gaining=='losing':
         flag_attribute_names.remove('flag_basin_loss')
 
     raqc_obj.stats_report(flag_attribute_names)
