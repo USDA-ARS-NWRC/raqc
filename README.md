@@ -154,6 +154,9 @@ Using above table and UserConfig:
 
 &nbsp;&nbsp; **ex2)** Within the 2800m elevation bin, pixels with (```difference``` < -304cm), the ```elevation_loss``` flag will be **True**, indicating an **Outlier Flag**
 
+![image](https://raw.githubusercontent.com/USDA-ARS-NWRC/raqc/devel/docs/USCASJ20190614_20190704_thresholds_plot.png)
+**Thresholds Plot:** This plot will be output with [thresholding][want_thresholds_plot] = True.  Shows upper and lower thresholds for `difference` and `difference_norm` used to classify `elevation` flags.
+
 ### [mandatory_options]
 <i>Most are mandatory...</i>
 ```
