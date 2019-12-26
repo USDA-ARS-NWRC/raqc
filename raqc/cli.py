@@ -97,7 +97,7 @@ def main():
 
 
     outlier_percentiles = cfg['thresholding']['outlier_percentiles']
-    elev_flag_only_veg = cfg['thresholding']['elev_flag_only_veg']
+    elev_flag_only_veg = cfg['mandatory_options']['elev_flag_only_veg']
     raqc_obj.flag_elevation(apply_moving_window,
                             block_window_size, block_window_threshold,
                             snowline_threshold, outlier_percentiles,

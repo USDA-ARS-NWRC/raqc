@@ -334,22 +334,17 @@ def create_clipped_file_names(file_path_out_base, file_path_dataset1,
 
     else:
         date1 = os.path.splitext(file_path_dataset1)[0].split('/')[-2][3:]
-        print('date 1', date1)
         # the file name without format extension (.nc)
         file_name_date2_te_temp = os.path.splitext(os.path.expanduser \
                                     (file_path_dataset2).split('/')[-1])[0]
         #find index of date start in file name i.e. find idx of '2' in 'USCATE2019...'
-        print('file_name_date2_temp ', file_name_date2_te_temp)
         id_date_start = file_name_date2_te_temp.index('2')
 
         basin_abbr = file_name_date2_te_temp[:id_date_start]
-        print('basin_abbr ', basin_abbr)
         date2 = file_name_date2_te_temp[id_date_start:id_date_start+8]
 
-        print('date2 ', date2)
         file_name_date2_te_second = file_name_date2_te_temp[id_date_start+8:]
         # Now let's combine into names
-        print('file_name_date2_te_second ', file_name_date2_te_second)
         file_path_date1_te = os.path.join(file_path_out_base,
                                 '{0}{1}_clipped_to_{2}{3}.tif'
                                 .format(basin_abbr, date1, date2,
@@ -479,7 +474,3 @@ def basic_plot(array, mask, cbar_string, suptitle_string, file_path_out):
     h.set_clim(minC, maxC)
     fig.suptitle(suptitle_string)
     plt.savefig(file_path_out, dpi = 180)
-
-# @profile
-def debug_fctn():
-    print('lets just see what the memory is')

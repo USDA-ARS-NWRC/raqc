@@ -14,12 +14,10 @@ import time
 import pandas as pd
 import json
 import affine
-from memory_profiler import profile
 from .utilities import prep_coords, get_elevation_bins, check_DEM_resolution, \
                         evenly_divisible_extents, get16bit, update_meta_from_json, \
                         apply_dict, create_clipped_file_names, format_date, \
-                        snowline, return_snow_files, \
-                        debug_fctn
+                        snowline, return_snow_files
 from tabulate import tabulate
 import pandas as pd
 import datetime
@@ -172,12 +170,16 @@ class MultiArrayOverlap(object):
         # check if clipped veg and dem files exist in base folder
         if self.already_clipped:
             if not (os.path.isfile(self.file_path_dem_te) & \
-                    os.path.isfile(self.file_path_veg_te)):
-                print(('{0}_dem_common_extent and \n{0}_veg_height_common_extent'
-                '\nmust exist to pass clipped files directly in UserConfig').format(self.file_name_base))
+                    os.path.isfile(self.file_path_veg_te) & \
+                    os.path.isfile(self.file_path_out_json)):
+                print(('{0}_dem_common_extent,'
+                '\n{0}_veg_height_common_extent, \nand {1}'
+                '\nmust exist to pass clipped files directly in UserConfig')
+                            .format(self.file_name_base, self.file_path_out_json))
 
-                sys.exit('Exiting ---- Ensure all clipped files present or simply'
-                '\npass original snow depth and topo files\n')
+                sys.exit('Exiting ---- Ensure clipped files and metadate.txt'
+                '\npresent in run directory or simply pass original snow'
+                '\ndepth and topo files\n')
             else:
                 pass
 
@@ -187,14 +189,17 @@ class MultiArrayOverlap(object):
                 \nsnow depth files however clipped files were detected in \
                 \nfile path.  No new files need to be created; existing  \
                 \nclipped files will be used\n'
-        log_msg2 = '\nHowever: \
+        log_msg2 = '\nFiles passed in UserConfig were original snow depth \
+                \nfiles however clipped files were detected in ile path.\
+                \n\nHowever: \
                 \n{0}_dem_common_extent AND \
-                \n{0}_veg_height_common_extent \
+                \n{0}_veg_height_common_extent AND\
+                \n{1}\
                 \nmust exist in order to use clipped files. \
                 \nRun will proceed. Topo files will be rescaled and clipped \
                 \n(original files will be retained) to match extents and rez \
-                \nof clipped snow files passed in UserConfig\n'. \
-                format(self.file_name_base)
+                \nof clipped snow files passed in UserConfig\n' \
+                .format(self.file_name_base, self.file_path_out_json)
         # User did not passed clipped files, but below code block automatically
         # detects the existence of clipped files based on file name
         if not self.already_clipped:
@@ -206,12 +211,14 @@ class MultiArrayOverlap(object):
 
             if os.path.isfile(self.file_path_date1_te) & os.path.isfile \
                               (self.file_path_date2_te):
-                self.log.info(log_msg1)
 
                 # check for existence of clipped dem and veg from topo.ncexi
                 if (os.path.isfile(self.file_path_dem_te) & \
-                    os.path.isfile(self.file_path_veg_te)):
+                    os.path.isfile(self.file_path_veg_te) & \
+                    os.path.isfile(self.file_path_out_json)):
                     self.already_clipped = True
+                    self.log.info(log_msg1)
+
 
                 # while clipped snow files were present, topo-derived files
                 # were not (i.e. dem and veg clipped). This will set
@@ -232,10 +239,7 @@ class MultiArrayOverlap(object):
         self.file_path_dataset2 = file_path_dataset2
         self.file_path_topo = file_path_topo
 
-    debug_fctn()
-
-
-    # @profile
+    #
     def clip_extent_overlap(self, remove_clipped_files):
         """
         finds overlapping extent of the input files (Geotiffs).  Adds clipped
@@ -359,7 +363,7 @@ class MultiArrayOverlap(object):
         run(run_arg3, shell = True)
         run(run_arg3b, shell = True)
 
-    # @profile
+    #
     def mask_basic(self):
         """
         Creates boolean masks and flags needed for multiple methods within RAQC
@@ -452,7 +456,7 @@ class MultiArrayOverlap(object):
 
         self.log.debug('Exited mask_advanced')
 
-    # @profile
+    #
     def make_diff_mat(self):
         """
         Saves as attribute a normalized difference matrix of the two input tiffs.
@@ -531,14 +535,14 @@ class MultiArrayOverlap(object):
                             this will be used later to shed a noisy flag
         """
         snownc_date1 = format_date(self.date1_string)
-        snownc_date2 = format_date(self.date1_string)
+        snownc_date2 = format_date(self.date2_string)
 
-
-        if snownc_date2-snownc_date1 <= datetime.timedelta(days = 1):
+        if (snownc_date2-snownc_date1 <= datetime.timedelta(days = 1)) & \
+                        (gaining_determination_method != 'neither'):
             while True:
                 print('\ndates of snow files are one day or less apart'
                 '\nin this case it is recommended that both basin_gain'
-                '\nand basin_loss flags be determined, which requires'
+                '\nand basin_loss flags be created, which requires'
                 '\ncfg[mandatory_options][method_determin_gaining]=neither.'
                 '\nWould you like to change that here and create both flags'
                 '\nor stick with your original UserConfig value of "{0}"?'
@@ -546,6 +550,10 @@ class MultiArrayOverlap(object):
                 .format(gaining_determination_method))
                 response = input()
                 if response == response.lower() == 'yes':
+                    print('note that this change will be reflected in your \
+                    backup config\n')
+                    self.log.info('UserConfig option [mandatory_options]\
+                    [method_determine_gaining] was changed to "neither"')
                     gaining_determination_method = 'neither'
                     break
                 elif response == response.lower() == 'no':
@@ -563,6 +571,9 @@ class MultiArrayOverlap(object):
             file_path_snownc1, file_path_snownc2 = \
                             return_snow_files(file_path_snownc, \
                                             self.date1_string, self.date2_string)
+            # If RAQC crashes here, it's probably because you passed a
+            # gaining_determination_method other than neither without providing
+            # a file_path_snow_nc
 
             # dates of snow.nc files used to determing basin change stats
             temp_date1 = ''.join(file_path_snownc1.split('/')[-2])
@@ -642,8 +653,7 @@ class MultiArrayOverlap(object):
             # If clipped, then RAQC has previously been run on this data and
             # basin change stats have are saved to metadata.txt
             log_message = '\nGaining or losing was not determined due to UserConfg'\
-                            '\nvalues or because dates were too close together'\
-                            '\nTherefore both basin_gain and basin_loss flags'\
+                            '\nvalues. Therefore both basin_gain and basin_loss flags'\
                             '\nwill be created'
         else:
             if gaining_determination_method == 'read_meta':
@@ -1094,7 +1104,7 @@ class MultiArrayOverlap(object):
 class PatternFilters():
     def init(self):
         pass
-    # @profile
+    #
     def mov_wind(self, name, size):
         """
          Moving window operation which adjusts window sizes to fit along
@@ -1162,7 +1172,7 @@ class PatternFilters():
         self.log.debug(log_message)
         return(pct)
 
-    # @profile
+    #
     def mov_wind2(self, name, size):
         """
         Orders and orders of magnitude faster moving window function than mov_wind().
@@ -1207,7 +1217,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
         #                         file_path_topo, file_out_root, basin,
         #                         file_name_modifier, file_path_snownc)
 
-    # @profile
+    #
     def make_histogram(self, name, nbins, thresh, moving_window_size):
         """
         Creates 2D histogram and finds outliers.  Outlier detection is pretty crude
@@ -1268,7 +1278,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                                         (round(tock - tick, 2))
         self.log.debug(log_message)
 
-    # @profile
+    #
     def flag_basin(self, apply_moving_window, moving_window_size, \
                             neighbor_threshold, snowline_threshold,
                             gaining):
@@ -1350,7 +1360,7 @@ class Flags(MultiArrayOverlap, PatternFilters):
                             self.elevation_band_resolution)
         self.log.info(log_msg1)
 
-    # @profile
+    #
     def flag_elevation(self, apply_moving_window, moving_window_size,
             neighbor_threshold, snowline_threshold, outlier_percentiles,
             elev_flag_only_veg):
